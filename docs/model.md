@@ -5,6 +5,9 @@ Wang et al. (2017), not a complete Fe-doped SrTiO3 defect-chemistry model. The b
 [`configs/figure4b.toml`](../configs/figure4b.toml), validated in their literature-facing units, and converted once to
 immutable SI values before numerical use.
 
+See [Differences from the paper](paper-discrepancies.md) for a short, non-specialist summary of where this prototype
+differs from or cannot be verified against the published model.
+
 ## Provenance and assumptions
 
 The temperature, voltage, thickness, relative permittivity, reported total Fe concentration, oxygen-vacancy
