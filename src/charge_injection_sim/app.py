@@ -184,10 +184,8 @@ def create_page(config_path: str | Path = DEFAULT_CONFIG) -> None:
         data["material"]["recombination_cm3_per_s"] = recombination.value
         for key, material_input in zip(material_keys, material_inputs, strict=True):
             data["material"][key] = material_input.value
-        for key, (_, solver_input, is_integer) in zip(
-            initial.solver.model_dump(), solver_inputs, strict=True
-        ):
-            data["solver"][key] = int(solver_input.value) if is_integer else solver_input.value
+        for key, solver_input, _is_integer in solver_inputs:
+            data["solver"][key] = solver_input.value
         for case, barrier_input in zip(data["cases"], barrier_inputs, strict=True):
             case["electron_barrier_ev"] = barrier_input.value
             case["hole_barrier_ev"] = barrier_input.value

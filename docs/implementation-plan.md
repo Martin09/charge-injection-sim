@@ -1,9 +1,12 @@
 # MVP implementation plan
 
-Status: Stages 1 and 2 implemented; Stages 3 and 4 remain proposed. The scope remains: **prove the concept with a
-small working MVP**.
+Status: Stages 1–3 implemented; Stage 4 executed and assessed in [reproduction.md](reproduction.md).
+Numerical/refinement checks and qualitative comparison pass. The remaining web MVP gate is a visual browser smoke
+check; headless UI callbacks have been exercised. The scope remains: **prove the concept with a small working MVP**.
 See [review.md](review.md) for the paper assessment and known scientific uncertainties.
-Commands and configuration interfaces below are planned, not implemented.
+The stage descriptions below retain the original design targets. Commands and configuration interfaces are implemented.
+Subsequent UI changes made the remaining material/solver fields editable and added a background process with a progress
+queue, ETA, and forkserver preloading, superseding the original read-only fields/framework-helper scope below.
 
 ## MVP goal and stopping point
 

@@ -1,13 +1,15 @@
 # Charge Injection Conductivity Simulation
 
-This project will model how electron and hole injection at metal-dielectric interfaces changes the spatial conductivity
+This project models how electron and hole injection at metal-dielectric interfaces changes the spatial conductivity
 of a dielectric material. The first target is the bipolar charge-injection result shown in **Figure 4(b)** of Wang et al.,
 where conductivity is plotted through a 500 um Fe-doped SrTiO3 crystal for several equal electron and hole Schottky
 barrier heights.
 
 The repository contains the Stage 1 validated input contract, Stage 2 numerical solver, and Stage 3 local web and
 reproducible-output workflow. All three benchmark cases converge with physical-domain, equation-residual, voltage,
-current, and refinement checks. The scientific comparison and reproduction assessment remain Stage 4 work.
+current, and refinement checks. The [Stage 4 assessment](docs/reproduction.md) finds qualitative agreement with
+Figure 4(b)'s ordering, shape, and conductivity scale under explicit approximations; quantitative agreement remains
+unestablished. A real-browser smoke check remains to close the web MVP gate.
 
 **First milestone:** an explicitly approximate, scientifically checked reproduction of Figure 4(b), driven by a
 TOML configuration file validated with Pydantic v2 and explored through a local web interface on WSL/Linux.
@@ -30,8 +32,9 @@ uv run python scripts/web.py
 
 Open `http://127.0.0.1:8080` in a browser. Under WSL 2, the Windows browser normally reaches this loopback address
 directly. The page loads `configs/figure4b.toml`, exposes temperature, voltage, thickness, recombination, and the three
-paired barrier heights, and shows the remaining material and solver values read-only. Run performs full Pydantic
-validation and uses NiceGUI's CPU-bound worker so the page remains responsive. A failed solve does not replace the last
+paired barrier heights, with the remaining material and solver values editable in the expandable parameter section.
+Run performs full Pydantic validation and solves in a background process with polled progress and an estimated remaining
+time. On WSL/Linux, a preloaded forkserver reduces repeated worker startup cost. A failed solve does not replace the last
 accepted plot. Save writes the validated snapshot and exact adaptive-mesh result arrays under `outputs/`.
 
 The first version prioritizes a working scientific loop. Auto-preview, caching, cancellation, pinned comparisons,
@@ -107,13 +110,13 @@ The initial benchmark described in the paper uses:
 | Oxygen-vacancy mobility | 2.20 x 10^-8 cm^2 V^-1 s^-1 |
 | Recombination-rate constant | 1.0 x 10^-8 cm^3 s^-1 |
 
-All values will be converted to SI units before calculation. Literature values, fitted values, and numerical settings
-will remain distinguishable in code and generated metadata.
+All values are converted to SI units before calculation. Literature values and numerical settings remain
+distinguishable in code and generated metadata; the benchmark uses no fitted values.
 
 These numbers do **not** fully specify the equilibrium defect chemistry. Substituting total Fe for charged acceptors
 in Equation (2) implies a large hole background incompatible with the stated vacancy-dominated conductivity.
-The first prototype will explicitly assume negligible equilibrium electrons/holes and a compensating fixed charge
-background. It must identify this as an approximation, not a solved Fe defect-chemistry model.
+The prototype explicitly assumes negligible equilibrium electrons/holes and a compensating fixed charge
+background. This is an approximation, not a solved Fe defect-chemistry model.
 
 As an independently calculated check, the tabulated vacancy concentration and mobility give
 `sigma_VO = 1.713 x 10^-6 S/m = 1.713 x 10^-8 S/cm`. They imply a homogeneous dielectric relaxation frequency of
