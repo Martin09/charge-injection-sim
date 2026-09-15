@@ -47,9 +47,10 @@ The conventional parabolic-band density of states is
 N = 2 [2 pi m_eff k_B T / h^2]^(3/2).
 ```
 
-This factor-of-two convention is part of the model. Contact densities are interpreted as total carrier densities. This
-follows the literal 2017 equation; its prose instead calls them injected densities, so the distinction is an explicit
-uncertainty when the calculated background is enabled.
+This factor-of-two convention is part of the model. The Schottky expressions are interpreted as injected carrier
+increments, consistent with the 2017 paper's prose, so the total boundary densities are `n0 + n_inj` and `p0 + p_inj`.
+This is equivalent to the literal total-density equation in simplified mode, where `n0 = p0 = 0`; the notation in the
+paper remains an explicit source uncertainty for nonzero backgrounds.
 
 ## Optional quenched equilibrium
 
@@ -137,6 +138,11 @@ Here `lambda_n=q n_s L/(epsilon E_s)`, `lambda_p=q p_s L/(epsilon E_s)`, and
 `rho_p=K p_s L/(mu_n E_s)`. The solver parameter is `log(J)`, guaranteeing a positive trial current without
 clipping. Nonzero contact boundary residuals are normalized to their boundary values; a zero-contact limiting case uses
 its finite carrier scale as the absolute normalization. The remaining residuals are `u(0)` and `u(1)-1`.
+
+The displayed equations use electron density as the independent carrier state and reconstruct holes from total current.
+For a strongly n-type equilibrium background this subtraction is ill-conditioned, so the implementation uses the
+algebraically equivalent dual formulation: it solves directly for holes and reconstructs the dominant electron density.
+Cross-case warm starts are disabled in this branch because the tiny minority-carrier boundary changes are poorly scaled.
 
 Boundary residuals must be normalized by their corresponding contact, field, or voltage scales. A solver's
 dimensionless residual tolerance is a numerical control, not a guarantee of relative physical accuracy. Returned

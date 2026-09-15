@@ -14,7 +14,7 @@ from charge_injection_sim.physics import (
     CasePhysics,
     conductivity_components_s_per_m,
     prepare_case,
-    reconstruct_holes_scaled,
+    reconstruct_carriers_scaled,
     scaled_boundary_residuals,
     scaled_rhs,
 )
@@ -98,7 +98,8 @@ def _initial_guess(mesh: FloatArray, physics: CasePhysics) -> tuple[FloatArray, 
         + physics.gamma_electron * physics.electron_contact_scaled
         + physics.gamma_hole * hole
     )
-    state = np.vstack((np.ones_like(mesh), electron, mesh))
+    carrier = electron if physics.solve_for_electron else np.full_like(mesh, hole)
+    state = np.vstack((np.ones_like(mesh), carrier, mesh))
     return state, np.array([np.log(current)], dtype=np.float64)
 
 
@@ -110,13 +111,22 @@ def _rescale_warm_start(
         [np.interp(mesh, warm_start.position_scaled, row) for row in warm_start.state_scaled]
     )
     electric_field = old_state[0] * old.electric_field_scale_v_per_m
-    electron = old_state[1] * old.electron_scale_m3
+    old_electron_scaled, old_hole_scaled = reconstruct_carriers_scaled(
+        old_state[0], old_state[1], warm_start.log_current_scaled, old
+    )
+    electron = old_electron_scaled * old.electron_scale_m3
+    hole = old_hole_scaled * old.hole_scale_m3
     voltage = old_state[2] * old.voltage_v
     current = np.exp(warm_start.log_current_scaled) * old.current_scale_a_per_m2
+    carrier = (
+        electron / physics.electron_scale_m3
+        if physics.solve_for_electron
+        else hole / physics.hole_scale_m3
+    )
     state = np.vstack(
         (
             electric_field / physics.electric_field_scale_v_per_m,
-            electron / physics.electron_scale_m3,
+            carrier,
             voltage / physics.voltage_v,
         )
     )
@@ -187,8 +197,10 @@ def _diagnose(
     scaled = solution.sol(dense_x)
     scaled_derivative = solution.sol(dense_x, 1)
     electric_field = scaled[0] * physics.electric_field_scale_v_per_m
-    electron = scaled[1] * physics.electron_scale_m3
-    hole_scaled = reconstruct_holes_scaled(scaled[0], scaled[1], float(solution.p[0]), physics)
+    electron_scaled, hole_scaled = reconstruct_carriers_scaled(
+        scaled[0], scaled[1], float(solution.p[0]), physics
+    )
+    electron = electron_scaled * physics.electron_scale_m3
     hole = hole_scaled * physics.hole_scale_m3
     current_density = np.exp(solution.p[0]) * physics.current_scale_a_per_m2
     electron_sigma, _hole_sigma, _vacancy_sigma, total_sigma = conductivity_components_s_per_m(
@@ -204,7 +216,14 @@ def _diagnose(
     field_derivative = (
         scaled_derivative[0] * physics.electric_field_scale_v_per_m / physics.length_m
     )
-    electron_derivative = scaled_derivative[1] * physics.electron_scale_m3 / physics.length_m
+    if physics.solve_for_electron:
+        electron_derivative = scaled_derivative[1] * physics.electron_scale_m3 / physics.length_m
+    else:
+        hole_derivative = scaled_derivative[1] * physics.hole_scale_m3 / physics.length_m
+        electron_derivative = (
+            -current_density * field_derivative / electric_field**2
+            - elementary_charge * physics.hole_mobility_m2_per_v_s * hole_derivative
+        ) / (elementary_charge * physics.electron_mobility_m2_per_v_s)
     poisson_residual = (
         field_derivative
         - elementary_charge
@@ -226,11 +245,18 @@ def _diagnose(
         * (electron * hole - physics.equilibrium_electron_m3 * physics.equilibrium_hole_m3)
     )
     boundary = scaled_boundary_residuals(solution.y[:, 0], solution.y[:, -1], solution.p, physics)
-    cancellation = (
-        np.abs(np.exp(solution.p[0]) / scaled[0])
-        + physics.gamma_vacancy
-        + np.abs(physics.gamma_electron * scaled[1])
-    ) / np.maximum(np.abs(physics.gamma_hole * hole_scaled), np.finfo(np.float64).tiny)
+    if physics.solve_for_electron:
+        cancellation = (
+            np.abs(np.exp(solution.p[0]) / scaled[0])
+            + physics.gamma_vacancy
+            + np.abs(physics.gamma_electron * electron_scaled)
+        ) / np.maximum(np.abs(physics.gamma_hole * hole_scaled), np.finfo(np.float64).tiny)
+    else:
+        cancellation = (
+            np.abs(np.exp(solution.p[0]) / scaled[0])
+            + physics.gamma_vacancy
+            + np.abs(physics.gamma_hole * hole_scaled)
+        ) / np.maximum(np.abs(physics.gamma_electron * electron_scaled), np.finfo(np.float64).tiny)
 
     diagnostics = SolverDiagnostics(
         status=int(solution.status),
@@ -262,11 +288,11 @@ def _diagnose(
 def _dimensional_arrays(solution: object, physics: CasePhysics) -> dict[str, FloatArray]:
     position = solution.x * physics.length_m
     electric_field = solution.y[0] * physics.electric_field_scale_v_per_m
-    electron = solution.y[1] * physics.electron_scale_m3
-    hole = (
-        reconstruct_holes_scaled(solution.y[0], solution.y[1], float(solution.p[0]), physics)
-        * physics.hole_scale_m3
+    electron_scaled, hole_scaled = reconstruct_carriers_scaled(
+        solution.y[0], solution.y[1], float(solution.p[0]), physics
     )
+    electron = electron_scaled * physics.electron_scale_m3
+    hole = hole_scaled * physics.hole_scale_m3
     electron_sigma, hole_sigma, vacancy_sigma, total_sigma = conductivity_components_s_per_m(
         electron,
         hole,
@@ -391,8 +417,12 @@ def solve_all_cases(
     )
     results: dict[int, SimulationResult] = {}
     warm_start = None
+    carry_warm_start = (
+        inputs.background.electron_m3 * inputs.material.electron_mobility_m2_per_v_s
+        <= inputs.background.hole_m3 * inputs.material.hole_mobility_m2_per_v_s
+    )
     for solved, (index, case) in enumerate(indexed_cases):
-        result, warm_start = _solve_case_with_warm_start(
+        result, solved_warm_start = _solve_case_with_warm_start(
             inputs,
             case,
             warm_start=warm_start,
@@ -400,5 +430,6 @@ def solve_all_cases(
             completed_cases=solved,
             total_cases=len(indexed_cases),
         )
+        warm_start = solved_warm_start if carry_warm_start else None
         results[index] = result
     return tuple(results[index] for index in range(len(inputs.cases)))

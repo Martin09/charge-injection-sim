@@ -108,6 +108,21 @@ def test_quenched_equilibrium_ohmic_limit() -> None:
     )
 
 
+def test_low_fe_n_type_background_converges_without_carrier_cancellation() -> None:
+    data = load_config(BENCHMARK_PATH).model_dump()
+    data["background"]["model"] = "quenched_equilibrium"
+    data["material"]["reported_total_fe_cm3"] = 1e17
+    inputs = InputConfig.model_validate(data).to_si()
+
+    result = solve_case(inputs, inputs.cases[0])
+
+    assert inputs.background.electron_m3 / 1e6 == pytest.approx(4.76e18, rel=1e-12)
+    assert result.diagnostics.minimum_electron_m3 > 0
+    assert result.diagnostics.minimum_hole_m3 > 0
+    assert result.diagnostics.poisson_scaled_residual <= 1e-4
+    assert result.diagnostics.continuity_scaled_residual <= 1e-4
+
+
 def test_recombination_free_bipolar_quadrature_reference() -> None:
     # Choose j, the Eq. (5) invariant, and endpoint fields, then derive L, V,
     # and contact densities independently by quadrature.

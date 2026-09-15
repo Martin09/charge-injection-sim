@@ -132,8 +132,9 @@ U(L) = V
 
 `U` is accumulated voltage drop, not electrostatic potential. Do not impose both species at both contacts.
 Use the conventional parabolic-band DOS `N=2(2 pi m_eff k_B T/h^2)^(3/2)`, recording that convention.
-Eq. (4) is interpreted as total contact carrier density; its distinction from injected density vanishes when
-`n0=p0=0`. Equal barriers do not imply equal DOS or symmetric profiles.
+Eq. (4)'s Schottky density is interpreted as an injected increment and added to the corresponding equilibrium density.
+Its distinction from total contact density vanishes when `n0=p0=0`. Equal barriers do not imply equal DOS or symmetric
+profiles.
 
 Nondimensionalize before solving. This spatial formulation avoids using `n` as an integration coordinate at
 carrier extrema, but divides by `E` and `j` and reconstructs `p` by subtraction. Check for singular values,

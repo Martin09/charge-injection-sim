@@ -25,8 +25,8 @@ gives approximately `4.86e18 cm^-3` Fe3+, which nearly compensates `2 c_v`, whil
   intended to represent the same transport equations under the prototype assumptions, but the authors' exact algorithm
   and settings are unavailable.
 - **Contact concentrations:** The paper's equation appears to prescribe total carrier density at each contact, while
-  nearby text calls it injected density. These are identical when `n0 = p0 = 0`, but would differ in a model with
-  nonzero equilibrium carriers.
+  nearby text calls it injected density. The calculated-background mode follows the prose and adds the Schottky density
+  to `n0` or `p0`; these interpretations are identical only when `n0 = p0 = 0`.
 - **Density of states:** This project uses the standard parabolic-band density-of-states formula, including a factor of
   two for spin. The paper gives effective masses but does not state every convention needed to verify an exact match.
 - **Implemented scope:** The project currently calculates the three bipolar conductivity profiles corresponding to

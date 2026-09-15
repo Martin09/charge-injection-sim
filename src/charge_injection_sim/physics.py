@@ -71,7 +71,9 @@ class CasePhysics:
     lambda_electron: float
     lambda_hole: float
     rho_hole: float
+    rho_electron: float
     equilibrium_product_scaled: float
+    solve_for_electron: bool
 
     @property
     def electron_contact_scaled(self) -> float:
@@ -107,12 +109,14 @@ def prepare_case(
         material.hole_effective_mass_kg, experiment.temperature_k
     )
     electron_contact = (
-        contact_density_m3(electron_dos, case.electron_barrier_j, experiment.temperature_k)
+        inputs.background.electron_m3
+        + contact_density_m3(electron_dos, case.electron_barrier_j, experiment.temperature_k)
         if electron_contact_m3 is None
         else electron_contact_m3
     )
     hole_contact = (
-        contact_density_m3(hole_dos, case.hole_barrier_j, experiment.temperature_k)
+        inputs.background.hole_m3
+        + contact_density_m3(hole_dos, case.hole_barrier_j, experiment.temperature_k)
         if hole_contact_m3 is None
         else hole_contact_m3
     )
@@ -183,10 +187,20 @@ def prepare_case(
             * experiment.thickness_m
             / (material.electron_mobility_m2_per_v_s * electric_field_scale)
         ),
+        rho_electron=(
+            material.recombination_m3_per_s
+            * electron_scale
+            * experiment.thickness_m
+            / (material.hole_mobility_m2_per_v_s * electric_field_scale)
+        ),
         equilibrium_product_scaled=(
             inputs.background.electron_m3
             * inputs.background.hole_m3
             / (electron_scale * hole_scale)
+        ),
+        solve_for_electron=(
+            inputs.background.electron_m3 * material.electron_mobility_m2_per_v_s
+            <= inputs.background.hole_m3 * material.hole_mobility_m2_per_v_s
         ),
     )
 
@@ -206,6 +220,41 @@ def reconstruct_holes_scaled(
     ) / physics.gamma_hole
 
 
+def reconstruct_electrons_scaled(
+    electric_field_scaled: FloatArray,
+    hole_scaled: FloatArray,
+    log_current_scaled: float,
+    physics: CasePhysics,
+) -> FloatArray:
+    """Reconstruct scaled electrons from the spatially constant total current."""
+    current_scaled = np.exp(log_current_scaled)
+    return (
+        current_scaled / electric_field_scaled
+        - physics.gamma_vacancy
+        - physics.gamma_hole * hole_scaled
+    ) / physics.gamma_electron
+
+
+def reconstruct_carriers_scaled(
+    electric_field_scaled: FloatArray,
+    carrier_scaled: FloatArray,
+    log_current_scaled: float,
+    physics: CasePhysics,
+) -> tuple[FloatArray, FloatArray]:
+    """Return scaled electron and hole densities for either state formulation."""
+    if physics.solve_for_electron:
+        electron = carrier_scaled
+        hole = reconstruct_holes_scaled(
+            electric_field_scaled, electron, log_current_scaled, physics
+        )
+    else:
+        hole = carrier_scaled
+        electron = reconstruct_electrons_scaled(
+            electric_field_scaled, hole, log_current_scaled, physics
+        )
+    return electron, hole
+
+
 def scaled_rhs(
     position_scaled: FloatArray,
     state_scaled: FloatArray,
@@ -215,24 +264,35 @@ def scaled_rhs(
 ) -> FloatArray:
     """Evaluate the dimensionless BVP equations."""
     del position_scaled
-    electric_field, electron, _voltage = state_scaled
+    electric_field, carrier, _voltage = state_scaled
     log_current = float(parameters[0])
     current = np.exp(log_current)
-    hole = reconstruct_holes_scaled(electric_field, electron, log_current, physics)
+    electron, hole = reconstruct_carriers_scaled(electric_field, carrier, log_current, physics)
     field_derivative = homotopy * (
         physics.lambda_hole * (hole - physics.equilibrium_hole_scaled)
         - physics.lambda_electron * (electron - physics.equilibrium_electron_scaled)
     )
-    electron_derivative = (
-        homotopy
-        * physics.rho_hole
-        * (electron * hole - physics.equilibrium_product_scaled)
-        / electric_field
-        - (electron / electric_field)
-        * (1.0 + physics.gamma_vacancy * electric_field / current)
-        * field_derivative
-    )
-    return np.vstack((field_derivative, electron_derivative, electric_field))
+    reaction = electron * hole - physics.equilibrium_product_scaled
+    if physics.solve_for_electron:
+        carrier_derivative = (
+            homotopy * physics.rho_hole * reaction / electric_field
+            - (electron / electric_field)
+            * (1.0 + physics.gamma_vacancy * electric_field / current)
+            * field_derivative
+        )
+    else:
+        electron_current_fraction = physics.gamma_electron * electron * electric_field / current
+        carrier_derivative = (
+            -homotopy * physics.rho_electron * reaction / electric_field
+            - (
+                hole / electric_field
+                + physics.gamma_vacancy
+                / (physics.gamma_hole * electric_field)
+                * (1.0 - electron_current_fraction)
+            )
+            * field_derivative
+        )
+    return np.vstack((field_derivative, carrier_derivative, electric_field))
 
 
 def scaled_boundary_residuals(
@@ -242,17 +302,20 @@ def scaled_boundary_residuals(
     physics: CasePhysics,
 ) -> FloatArray:
     """Evaluate normalized contact and accumulated-voltage residuals."""
-    holes_at_anode = reconstruct_holes_scaled(
+    electrons_at_cathode, _holes_at_cathode = reconstruct_carriers_scaled(
+        state_at_cathode[0:1], state_at_cathode[1:2], float(parameters[0]), physics
+    )
+    _electrons_at_anode, holes_at_anode = reconstruct_carriers_scaled(
         state_at_anode[0:1], state_at_anode[1:2], float(parameters[0]), physics
-    )[0]
+    )
     hole_normalizer = physics.hole_contact_scaled if physics.hole_contact_scaled > 0.0 else 1.0
     electron_normalizer = (
         physics.electron_contact_scaled if physics.electron_contact_scaled > 0.0 else 1.0
     )
     return np.array(
         [
-            (holes_at_anode - physics.hole_contact_scaled) / hole_normalizer,
-            (state_at_cathode[1] - physics.electron_contact_scaled) / electron_normalizer,
+            (holes_at_anode[0] - physics.hole_contact_scaled) / hole_normalizer,
+            (electrons_at_cathode[0] - physics.electron_contact_scaled) / electron_normalizer,
             state_at_anode[2],
             state_at_cathode[2] - 1.0,
         ],

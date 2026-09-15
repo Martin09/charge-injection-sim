@@ -161,7 +161,7 @@ strategy needed for an exact reproduction. Before treating results as quantitati
 
 - how electron and hole concentrations are coupled when integrating the reduced equation;
 - how the unknown current density is selected to satisfy both contact and voltage constraints;
-- whether the Denk quenched-equilibrium constants and the paper's total-density contact convention match the authors'
+- whether the Denk constants and the implemented equilibrium-plus-injected contact convention match the authors'
   unpublished implementation; and
 - how sensitive the result is to explicit background and contact assumptions without access to the authors' code.
 

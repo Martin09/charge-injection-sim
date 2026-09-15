@@ -120,8 +120,8 @@ barriers should not be enforced as mirror-symmetric boundary densities.
 - Prescribed uniform vacancy density with finite ionic drift conductivity; no vacancy evolution equation.
 - The default uses `n0 = p0 = 0` with fixed compensating charge equivalent to `2 c_VO`. The optional quenched mode
   calculates `n0`, `p0`, Fe3+, and Fe4+ from the Denk equilibria without treating total Fe as fully ionized.
-- Equation (4) is read as a boundary condition on total `n`/`p` (as typeset), even though the prose calls them injected.
-  The distinction vanishes for the prototype's zero electronic background; revisit before adding nonzero backgrounds.
+- Equation (4)'s Schottky densities are treated as injected increments, following the prose. They are added to `n0` or
+  `p0` in calculated-background mode; this differs from reading the typeset equation as a total-density boundary.
 - Constant bimolecular `K = 1e-14 m^3/s`, not a fitted parameter or an SRH/Auger kinetics implementation.
   The Figure 4 caption prints mobility-like units for K; the body and dimensional balance of Eq. (5)
   require concentration-inverse time units (`cm^3/s` in the paper). Record this inconsistency.
