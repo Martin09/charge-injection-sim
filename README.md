@@ -8,6 +8,25 @@ barrier heights.
 The repository is currently a development scaffold. It does not yet contain a validated numerical implementation or a
 reproduced figure.
 
+**First milestone:** an explicitly approximate, scientifically checked reproduction of Figure 4(b), driven by a
+TOML configuration file validated with Pydantic v2 and explored through a local web interface on WSL/Linux.
+The MVP uses one NiceGUI + Plotly page: edit parameters, click Run, inspect the three curves, and save the result.
+A thin script supports repeatable runs. The author's code/data are unavailable; exact reproduction is not
+a prerequisite for this milestone. No simulator, web interface, run script, or configuration schema is implemented yet.
+
+See the [critical review](docs/review.md) for the evidence and unresolved assumptions, and the
+[staged implementation plan](docs/implementation-plan.md) for architecture, delivery gates, and validation.
+
+## Planned Interactive Workflow
+
+Load the benchmark TOML at startup, edit a few unit-labeled parameters, and click Run. Validate the inputs,
+show a busy indicator during the single background calculation, then display the three conductivity curves and
+basic numerical diagnostics. Save the actual run inputs as JSON, raw CSV data, diagnostics, and a basic PNG;
+the reproduction script can reload those inputs. The page and script use the same solver and Pydantic schema.
+
+The first version prioritizes a working scientific loop. Auto-preview, caching, cancellation, pinned comparisons,
+browser file editing, and publication polish are deferred until the MVP demonstrates what is useful.
+
 ## Reference
 
 J.-J. Wang, T. J. M. Bayer, R. Wang, J. J. Carter, C. A. Randall, and L.-Q. Chen, "Unexpected significant increase in
@@ -16,12 +35,14 @@ bulk conductivity of a dielectric arising from charge injection," *Applied Physi
 
 ## Intended Model
 
-The paper combines four ingredients in a one-dimensional, steady-state model:
+The paper combines four ingredients in a one-dimensional, electronic steady-state approximation with a prescribed
+uniform vacancy background. This is not a simulation of long-time ionic redistribution or resistance degradation:
 
 1. Drift conductivity from electrons, holes, and mobile oxygen vacancies.
 2. Poisson's equation relating the electric-field gradient to injected space charge.
 3. Schottky boundary concentrations at the cathode and anode.
-4. A continuity equation coupling electron and hole currents through recombination.
+4. A modified continuity equation coupling electron and hole currents through recombination, including the
+   ionic-current correction in Equation (5).
 
 The local total conductivity is expected to be evaluated as
 
@@ -31,6 +52,8 @@ sigma(x) = e * [mu_n * n(x) + mu_p * p(x) + 2 * mu_VO * c_VO]
 
 with charge signs handled in the transport equations. The first reproduction should use the paper's Fe-doped SrTiO3
 case and compare profiles for equal electron and hole barriers of 1.00 eV, 0.85 eV, and 0.80 eV.
+Figure 4(b) uses a linear position axis from 0 to 0.05 cm (anode to cathode) and a logarithmic conductivity axis
+in S/cm. Equal barriers do not imply symmetric profiles because the effective masses and mobilities differ.
 
 ## Baseline Parameters
 
@@ -42,7 +65,7 @@ The initial benchmark described in the paper uses:
 | Applied voltage | 40 V |
 | Sample thickness | 500 um |
 | Relative permittivity | 220 |
-| Acceptor concentration, primarily Fe | 5.58 x 10^18 cm^-3 |
+| Reported total Fe concentration (not automatically ionized acceptors) | 5.58 x 10^18 cm^-3 |
 | Oxygen-vacancy concentration | 2.43 x 10^18 cm^-3 |
 | Electron effective mass | 6 m0 |
 | Hole effective mass | 12 m0 |
@@ -54,11 +77,21 @@ The initial benchmark described in the paper uses:
 All values will be converted to SI units before calculation. Literature values, fitted values, and numerical settings
 will remain distinguishable in code and generated metadata.
 
+These numbers do **not** fully specify the equilibrium defect chemistry. Substituting total Fe for charged acceptors
+in Equation (2) implies a large hole background incompatible with the stated vacancy-dominated conductivity.
+The first prototype will explicitly assume negligible equilibrium electrons/holes and a compensating fixed charge
+background. It must identify this as an approximation, not a solved Fe defect-chemistry model.
+
+As an independently calculated check, the tabulated vacancy concentration and mobility give
+`sigma_VO = 1.713 x 10^-6 S/m = 1.713 x 10^-8 S/cm`. They imply a homogeneous dielectric relaxation frequency of
+about 140 Hz, rather than the reported experimental 200 Hz. This discrepancy must be reported rather than
+removed by silently adjusting mobility or concentration.
+
 ## Reproduction Criteria
 
 The first implementation can be considered aligned with Figure 4(b) when it:
 
-- produces finite, positive carrier concentrations and conductivity across the full sample;
+- produces finite, nonnegative carrier concentrations and strictly positive total conductivity across the full sample;
 - satisfies the applied-voltage and spatially constant-current constraints within stated tolerances;
 - recovers the bulk oxygen-vacancy conductivity when injection is negligible;
 - shows enhanced conductivity near both contacts for bipolar injection;
@@ -77,16 +110,22 @@ strategy needed for an exact reproduction. Before treating results as quantitati
 - how electron and hole concentrations are coupled when integrating the reduced equation;
 - how the unknown current density is selected to satisfy both contact and voltage constraints;
 - which defect-chemistry values define the equilibrium electron and hole concentrations; and
-- whether the authors' supplemental Fortran implementation is available for cross-checking.
+- how sensitive the result is to explicit background and contact assumptions without access to the authors' code.
 
 These uncertainties should be documented rather than absorbed into fitted constants.
+The user has already sought the authors' code/data without success. The plan therefore derives a spatial boundary-value
+problem from Equations (1), (3), and (5), rather than relying on the missing implementation or treating Equation (6)
+as a complete initial-value problem.
 
 ## Planned Layout
 
 ```text
 src/charge_injection_sim/  model, parameters, solver, and result types
+configs/                   validated TOML benchmark inputs (planned)
+docs/                      review and staged implementation plan
 scripts/                   thin reproducible simulation/plot entry points
 tests/                     unit, limiting-case, and numerical regression tests
+tests/data/                digitized comparison curves with provenance (post-MVP)
 outputs/                   generated data and figures (ignored by Git)
 ref_paper.pdf              primary reference paper
 ```
@@ -109,5 +148,9 @@ uv run ruff format --check .
 uv run prek run --all-files
 ```
 
-The pre-commit hooks keep `uv.lock` synchronized, run Ruff, and validate common text/configuration errors. Tests disable
-network access so that scientific results do not depend on external services.
+The pre-commit hooks keep `uv.lock` synchronized, run Ruff, and validate common text/configuration errors.
+The pytest configuration disables network access, but no tests exist yet: currently `uv run pytest` fails because
+the configured `tests/` directory is absent and warnings are errors. Source packaging is also not yet enabled
+(`tool.uv.package = false`); packaging, Pydantic, and essential tests are Stage 1 deliverables.
+Code will use type annotations; dedicated type-checker tooling can follow the MVP.
+CI is out of scope at this point; checks will be run locally with uv and prek.
