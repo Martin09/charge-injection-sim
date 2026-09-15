@@ -1,6 +1,6 @@
 # Prototype model contract
 
-This note defines the first numerical model before its solver is implemented. It is an approximate interpretation of
+This note defines the first numerical model implemented in `physics.py` and `solver.py`. It is an approximate interpretation of
 Wang et al. (2017), not a complete Fe-doped SrTiO3 defect-chemistry model. The benchmark inputs are recorded in
 [`configs/figure4b.toml`](../configs/figure4b.toml), validated in their literature-facing units, and converted once to
 immutable SI values before numerical use.
@@ -78,13 +78,29 @@ Here `U` is accumulated voltage drop, not electrostatic potential. The formulati
 carrier species at both contacts. Equal barrier energies do not produce equal boundary densities because `N_C` and
 `N_V` depend on different effective masses.
 
-## Numerical scaling contract
+## Numerical scaling
 
-The Stage 2 solver must nondimensionalize the equations before calling a boundary-value solver. Candidate fixed scales
-are `x_s = L`, `E_s = V/L`, concentration scale `c_s = c_v`, conductivity scale `s_s = s_v`, voltage scale `U_s = V`,
-and current scale `j_s = s_v V/L`. Contact densities and resulting dimensionless groups must be computed in float64
-from the resolved SI values. If these provisional scales produce poorly conditioned boundary residuals, Stage 2 may
-choose documented case-dependent scales, but physical inputs and equations must remain unchanged.
+The solver nondimensionalizes before calling `scipy.integrate.solve_bvp`. It uses `x_s=L`, `E_s=V/L`, and `U_s=V`.
+For each carrier, its concentration scale is the larger of its contact density and the density whose electronic
+conductivity equals `s_v`. Thus `n_s=max(n_c,s_v/(q mu_n))` and `p_s=max(p_a,s_v/(q mu_p))`. This keeps the scales
+finite for zero-contact limiting cases and avoids combining carrier variables near zero with coefficients of order
+`10^7`, as the provisional `c_v` scale does for the benchmark.
+
+Let `s_s=s_v+q mu_n n_s+q mu_p p_s`, `j_s=s_s E_s`, and define the conductivity fractions
+`gamma_v=s_v/s_s`, `gamma_n=q mu_n n_s/s_s`, and `gamma_p=q mu_p p_s/s_s`. With `xi=x/L`, `e=E/E_s`,
+`N=n/n_s`, `P=p/p_s`, `u=U/V`, and `J=j/j_s`, the implemented equations are:
+
+```text
+P    = (J/e - gamma_v - gamma_n N) / gamma_p
+e'   = lambda_p P - lambda_n N
+N'   = rho_p N P/e - (N/e)(1 + gamma_v e/J)e'
+u'   = e
+```
+
+Here `lambda_n=q n_s L/(epsilon E_s)`, `lambda_p=q p_s L/(epsilon E_s)`, and
+`rho_p=K p_s L/(mu_n E_s)`. The solver parameter is `log(J)`, guaranteeing a positive trial current without
+clipping. Nonzero contact boundary residuals are normalized to their boundary values; a zero-contact limiting case uses
+its finite carrier scale as the absolute normalization. The remaining residuals are `u(0)` and `u(1)-1`.
 
 Boundary residuals must be normalized by their corresponding contact, field, or voltage scales. A solver's
 dimensionless residual tolerance is a numerical control, not a guarantee of relative physical accuracy. Returned
@@ -106,8 +122,14 @@ The solver must fail visibly rather than clip densities, insert hidden floors, o
 
 ## Required solution checks
 
-Before a profile is accepted, Stage 2 must verify finite fields and nonnegative carrier densities on both the adaptive
+Before a profile is accepted, the solver verifies finite fields and nonnegative carrier densities on both the adaptive
 mesh and a denser evaluation grid, positive total conductivity, the supported field direction, contact residuals,
 independently integrated voltage, spatial current consistency, Poisson and modified-continuity residuals, and stability
 under a tighter tolerance or changed mesh. The vacancy-only conductivity and at least one independent transport limit
-must pass before comparison with Figure 4(b).
+must pass before comparison with Figure 4(b). Diagnostics are evaluated on at least 1001 points using the dimensional
+spline and its derivative; accepted result arrays preserve the adaptive mesh.
+
+The nontrivial independent test uses the compatible `R=0` bipolar invariant
+`j_n exp(j_v/j)=constant`, total current, and Poisson's equation to integrate `dx/dE` and `E dx/dE` by quadrature.
+A spatially varying `p=0` version is not a valid reference for this model: total-current closure would require
+`j=j_n+j_v`, which is incompatible with the invariant unless `j_v`, and hence `E`, is constant.

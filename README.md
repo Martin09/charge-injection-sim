@@ -5,15 +5,16 @@ of a dielectric material. The first target is the bipolar charge-injection resul
 where conductivity is plotted through a 500 um Fe-doped SrTiO3 crystal for several equal electron and hole Schottky
 barrier heights.
 
-The repository now contains the Stage 1 package and validated benchmark input contract. It does not yet contain a
-numerical solver, web interface, or reproduced figure.
+The repository now contains the Stage 1 validated input contract and the Stage 2 numerical solver. All three benchmark
+cases converge with physical-domain, equation-residual, voltage, current, and refinement checks. It does not yet contain
+the web interface, exports, or a reproduced figure.
 
 **First milestone:** an explicitly approximate, scientifically checked reproduction of Figure 4(b), driven by a
 TOML configuration file validated with Pydantic v2 and explored through a local web interface on WSL/Linux.
 The MVP uses one NiceGUI + Plotly page: edit parameters, click Run, inspect the three curves, and save the result.
 A thin script will support repeatable runs. The author's code/data are unavailable; exact reproduction is not
-a prerequisite for this milestone. The configuration schema and SI conversion are implemented; the simulator, web
-interface, and run script remain planned.
+a prerequisite for this milestone. The configuration schema, SI conversion, and simulator are implemented; the web
+interface, exports, and run script remain planned.
 
 See the [critical review](docs/review.md) for the evidence and unresolved assumptions, and the
 [staged implementation plan](docs/implementation-plan.md) for architecture, delivery gates, and validation.
@@ -123,11 +124,11 @@ as a complete initial-value problem.
 ## Project Layout
 
 ```text
-src/charge_injection_sim/  validated inputs and SI conversion; solver modules planned
+src/charge_injection_sim/  validated inputs, SI conversion, physics, and BVP solver
 configs/                   validated TOML benchmark inputs
 docs/                      review and staged implementation plan
 scripts/                   thin reproducible simulation/plot entry points
-tests/                     configuration/unit tests; numerical tests planned
+tests/                     configuration, unit, limiting-case, solver, and refinement tests
 tests/data/                digitized comparison curves with provenance (post-MVP)
 outputs/                   generated data and figures (ignored by Git)
 ref_paper.pdf              primary reference paper
@@ -153,8 +154,17 @@ uv run prek run --all-files
 
 The pre-commit hooks keep `uv.lock` synchronized, run Ruff, and validate common text/configuration errors.
 The pytest configuration disables network access. Source packaging, Pydantic v2 validation, the benchmark TOML,
-immutable SI conversion, and foundational configuration tests are implemented. Load the benchmark with
-`charge_injection_sim.load_config("configs/figure4b.toml")`; call `.to_si()` before numerical use and
-`.model_dump_json()` when recording the resolved snapshot.
+immutable SI conversion, numerical solver, and scientific tests are implemented. Run the benchmark with:
+
+```python
+from charge_injection_sim import load_config, solve_all_cases
+
+inputs = load_config("configs/figure4b.toml").to_si()
+results = solve_all_cases(inputs)
+```
+
+Each result contains immutable adaptive-mesh arrays in SI units and diagnostics including current density, solver
+status, boundary and voltage errors, current spread, independently evaluated equation residuals, extrema, node count,
+and elapsed time. Call `.model_dump_json()` on `inputs` when recording the resolved input snapshot.
 Code will use type annotations; dedicated type-checker tooling can follow the MVP.
 CI is out of scope at this point; checks will be run locally with uv and prek.

@@ -1,6 +1,7 @@
 # MVP implementation plan
 
-Status: proposed implementation, reflecting the latest scope decision: **prove the concept with a small working MVP**.
+Status: Stages 1 and 2 implemented; Stages 3 and 4 remain proposed. The scope remains: **prove the concept with a
+small working MVP**.
 See [review.md](review.md) for the paper assessment and known scientific uncertainties.
 Commands and configuration interfaces below are planned, not implemented.
 
@@ -145,9 +146,11 @@ with the new equations documented; never mask failures with density floors or si
    and `scipy.constants`. Precompute material constants once per case; no Pydantic or UI work in callbacks.
 2. Independently verify the vacancy baseline (`1.713e-6 S/m`) and the DOS/contact scales recorded in the review.
 3. Validate a compatible synthetic charge-neutral Ohmic limit: `E=V/L`, `j=sigma V/L`.
-   Also implement one nontrivial independent transport reference before assessing paper agreement. For the
-   unipolar case `p=p0=n0=0`, `R=0`, Eq. (5) yields `j_n exp(j_v/j)=constant`; combine it with Poisson and
-   total current to construct an independent quadrature reference. Do not reuse the production residual as the reference.
+   Also implement one nontrivial independent transport reference before assessing paper agreement. With `R=0`,
+   Eq. (5) yields `j_n exp(j_v/j)=constant`; combine it with Poisson and total current to construct an independent
+   bipolar quadrature reference. Do not reuse the production residual as the reference. The originally proposed
+   spatially varying unipolar specialization was removed because `p=0` also requires `j=j_n+j_v`; together with
+   the invariant this permits only constant `j_v` and therefore no nontrivial field profile.
 4. Start with dimensionless `scipy.integrate.solve_bvp`, including its unknown-current parameter. Use the
    high-barrier solution to initialize the next case. Add bounded intermediate continuation steps only if needed.
 5. Return arrays plus a small diagnostic record: status/message, current, residuals, node count, and elapsed time.
