@@ -1,5 +1,6 @@
 """Boundary-value solver and independent diagnostics for the injection model."""
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from time import perf_counter
 
@@ -19,10 +20,28 @@ from charge_injection_sim.physics import (
 )
 
 FloatArray = NDArray[np.float64]
+ProgressCallback = Callable[["SolverProgressEvent"], None]
 
 
 class SolverError(RuntimeError):
     """Raised when a numerical result fails convergence or physical checks."""
+
+
+@dataclass(frozen=True)
+class SolverProgressEvent:
+    """Approximate progress snapshot emitted after each continuation attempt.
+
+    Progress is quantized by continuation attempts, not wall time, so the
+    remaining-time estimate based on it inherits that coarseness.
+    """
+
+    completed_cases: int
+    total_cases: int
+    current_case: str
+    case_steps_done: int
+    case_steps_total: int
+    node_count: int
+    case_elapsed_seconds: float
 
 
 @dataclass(frozen=True)
@@ -108,6 +127,11 @@ def _solve_scaled(
     physics: CasePhysics,
     settings: SolverSettings,
     warm_start: _WarmStart | None,
+    *,
+    progress: ProgressCallback | None = None,
+    started: float = 0.0,
+    completed_cases: int = 0,
+    total_cases: int = 1,
 ) -> tuple[object, int]:
     mesh = np.linspace(0.0, 1.0, settings.initial_nodes, dtype=np.float64)
     state, parameters = (
@@ -118,7 +142,7 @@ def _solve_scaled(
     solution = None
     attempts = 0
     homotopy_steps = (0.0, 0.1, 0.3, 0.6, 1.0) if warm_start is None else (1.0,)
-    for homotopy in homotopy_steps:
+    for step_index, homotopy in enumerate(homotopy_steps):
         attempts += 1
         solution = solve_bvp(
             lambda x, y, p, h=homotopy: scaled_rhs(x, y, p, physics, h),
@@ -137,6 +161,18 @@ def _solve_scaled(
         mesh = solution.x
         state = solution.y
         parameters = solution.p
+        if progress is not None:
+            progress(
+                SolverProgressEvent(
+                    completed_cases=completed_cases,
+                    total_cases=total_cases,
+                    current_case=physics.name,
+                    case_steps_done=step_index + 1,
+                    case_steps_total=len(homotopy_steps),
+                    node_count=int(solution.x.size),
+                    case_elapsed_seconds=perf_counter() - started,
+                )
+            )
     assert solution is not None
     return solution, attempts
 
@@ -289,6 +325,9 @@ def _solve_case_with_warm_start(
     electron_contact_m3: float | None = None,
     hole_contact_m3: float | None = None,
     warm_start: _WarmStart | None = None,
+    progress: ProgressCallback | None = None,
+    completed_cases: int = 0,
+    total_cases: int = 1,
 ) -> tuple[SimulationResult, _WarmStart]:
     """Solve and validate one barrier case."""
     physics = prepare_case(
@@ -298,7 +337,15 @@ def _solve_case_with_warm_start(
         hole_contact_m3=hole_contact_m3,
     )
     started = perf_counter()
-    solution, attempts = _solve_scaled(physics, inputs.solver, warm_start)
+    solution, attempts = _solve_scaled(
+        physics,
+        inputs.solver,
+        warm_start,
+        progress=progress,
+        started=started,
+        completed_cases=completed_cases,
+        total_cases=total_cases,
+    )
     diagnostics = _diagnose(solution, physics, perf_counter() - started, attempts)
     _validate_diagnostics(diagnostics, inputs.solver.residual_tolerance)
 
@@ -328,7 +375,9 @@ def solve_case(
     return result
 
 
-def solve_all_cases(inputs: ResolvedInputsSI) -> tuple[SimulationResult, ...]:
+def solve_all_cases(
+    inputs: ResolvedInputsSI, progress: ProgressCallback | None = None
+) -> tuple[SimulationResult, ...]:
     """Solve cases from highest to lowest barrier, carrying each solution forward."""
     indexed_cases = sorted(
         enumerate(inputs.cases),
@@ -337,7 +386,14 @@ def solve_all_cases(inputs: ResolvedInputsSI) -> tuple[SimulationResult, ...]:
     )
     results: dict[int, SimulationResult] = {}
     warm_start = None
-    for index, case in indexed_cases:
-        result, warm_start = _solve_case_with_warm_start(inputs, case, warm_start=warm_start)
+    for solved, (index, case) in enumerate(indexed_cases):
+        result, warm_start = _solve_case_with_warm_start(
+            inputs,
+            case,
+            warm_start=warm_start,
+            progress=progress,
+            completed_cases=solved,
+            total_cases=len(indexed_cases),
+        )
         results[index] = result
     return tuple(results[index] for index in range(len(inputs.cases)))

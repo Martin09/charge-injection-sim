@@ -8,7 +8,12 @@ from scipy.optimize import brentq
 
 from charge_injection_sim import load_config
 from charge_injection_sim.config import ResolvedInputsSI
-from charge_injection_sim.solver import SolverError, solve_all_cases, solve_case
+from charge_injection_sim.solver import (
+    SolverError,
+    SolverProgressEvent,
+    solve_all_cases,
+    solve_case,
+)
 
 BENCHMARK_PATH = Path(__file__).parents[1] / "configs" / "figure4b.toml"
 
@@ -199,3 +204,22 @@ def test_solver_reports_node_limit_failure() -> None:
 
     with pytest.raises(SolverError, match="maximum number of mesh nodes"):
         solve_case(inputs.model_copy(update={"solver": settings}), inputs.cases[-1])
+
+
+@pytest.mark.regression
+def test_solve_all_cases_emits_progress_events() -> None:
+    inputs = load_config(BENCHMARK_PATH).to_si()
+    events: list[SolverProgressEvent] = []
+
+    results = solve_all_cases(inputs, progress=events.append)
+
+    assert results
+    total_cases = len(inputs.cases)
+    continuation_steps = 5 if len(events) > total_cases else 1
+    assert len(events) >= total_cases
+    assert all(event.total_cases == total_cases for event in events)
+    assert all(event.case_steps_total in (1, continuation_steps) for event in events)
+    assert events[0].completed_cases == 0
+    assert events[-1].completed_cases == total_cases - 1
+    assert all(event.case_elapsed_seconds >= 0.0 for event in events)
+    assert all(event.node_count >= inputs.solver.initial_nodes for event in events)

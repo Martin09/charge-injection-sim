@@ -3,10 +3,12 @@
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
+from queue import Empty as _EmptyQueue
+from time import perf_counter
 from typing import Any
 
 import plotly.graph_objects as go
-from nicegui import run, ui
+from nicegui import ui
 from pydantic import ValidationError
 
 from charge_injection_sim.config import (
@@ -16,11 +18,14 @@ from charge_injection_sim.config import (
     load_config,
 )
 from charge_injection_sim.output import save_run
-from charge_injection_sim.solver import SimulationResult, SolverError, solve_all_cases
+from charge_injection_sim.runner import start_solver_worker
+from charge_injection_sim.solver import SimulationResult, SolverProgressEvent
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_CONFIG = PROJECT_ROOT / "configs" / "figure4b.toml"
 DEFAULT_OUTPUT_ROOT = PROJECT_ROOT / "outputs"
+
+_PROGRESS_POLL_SECONDS = 0.1
 
 
 @dataclass(frozen=True)
@@ -120,6 +125,11 @@ def create_page(config_path: str | Path = DEFAULT_CONFIG) -> None:
                     busy = ui.spinner(size="lg")
                     busy.set_visibility(False)
                 error_label = ui.label().classes("whitespace-pre-wrap text-red-800")
+                progress_row = ui.column().classes("w-full gap-1")
+                with progress_row:
+                    progress_bar = ui.linear_progress(value=0.0, show_value=False)
+                    progress_detail = ui.label("").classes("text-xs text-gray-600")
+                progress_row.set_visibility(False)
 
             with ui.column().classes("grow min-w-0 gap-5"):
                 chart = ui.plotly(_figure(())).classes("w-full h-[32rem]")
@@ -200,8 +210,134 @@ def create_page(config_path: str | Path = DEFAULT_CONFIG) -> None:
     for field in ui_inputs:
         field.on_value_change(lambda _event: mark_edited())
 
-    async def execute_run() -> None:
-        nonlocal completed, in_flight
+    worker_process: Any = None
+    progress_queue: Any = None
+    pending_snapshot: InputConfig | None = None
+    pending_resolved: ResolvedInputsSI | None = None
+    run_started_at = 0.0
+
+    def _progress_fraction(event: SolverProgressEvent) -> float:
+        case_steps = max(event.case_steps_total, 1)
+        within_case = min(event.case_steps_done, case_steps) / case_steps
+        return (event.completed_cases + within_case) / max(event.total_cases, 1)
+
+    def _eta_text(event: SolverProgressEvent) -> str:
+        fraction = max(_progress_fraction(event), 0.02)
+        elapsed = perf_counter() - run_started_at
+        remaining = elapsed * (1.0 - fraction) / fraction
+        return f"elapsed {elapsed:.0f} s, ~{remaining:.0f} s remaining"
+
+    def _progress_detail(event: SolverProgressEvent) -> str:
+        return (
+            f"{event.current_case} (case {event.completed_cases + 1} of "
+            f"{event.total_cases}, continuation step {event.case_steps_done} of "
+            f"{event.case_steps_total}, {event.node_count} nodes): {_eta_text(event)}"
+        )
+
+    def accept_run(snapshot: InputConfig, resolved: ResolvedInputsSI, results) -> None:
+        nonlocal completed
+        completed = _CompletedRun(snapshot, resolved, results)
+        chart.update_figure(_figure(results))
+        diagnostics_card.clear()
+        with diagnostics_card:
+            ui.label("Accepted diagnostics").classes("text-xl font-bold")
+            rows = []
+            for result in results:
+                diagnostics = result.diagnostics
+                maximum_error = max(
+                    diagnostics.maximum_boundary_residual,
+                    diagnostics.voltage_relative_error,
+                    diagnostics.poisson_scaled_residual,
+                    diagnostics.continuity_scaled_residual,
+                )
+                rows.append(
+                    {
+                        "case": result.case_name,
+                        "elapsed_s": f"{diagnostics.elapsed_seconds:.3f}",
+                        "nodes": diagnostics.node_count,
+                        "current": f"{diagnostics.current_density_a_per_m2:.6g}",
+                        "max_residual": f"{maximum_error:.3g}",
+                    }
+                )
+            ui.table(
+                columns=[
+                    {"name": "case", "label": "Case", "field": "case"},
+                    {"name": "elapsed_s", "label": "Elapsed (s)", "field": "elapsed_s"},
+                    {"name": "nodes", "label": "Nodes", "field": "nodes"},
+                    {"name": "current", "label": "Current (A/m^2)", "field": "current"},
+                    {
+                        "name": "max_residual",
+                        "label": "Max scaled error",
+                        "field": "max_residual",
+                    },
+                ],
+                rows=rows,
+                row_key="case",
+            ).classes("w-full")
+        elapsed = sum(result.diagnostics.elapsed_seconds for result in results)
+        status_label.set_text(f"Last completed run passed ({elapsed:.3f} s solver time)")
+        save_button.enable()
+
+    def reject_run(message: str) -> None:
+        error_label.set_text(f"Run failed: {message}")
+        status_label.set_text("Last run failed; no new figure was accepted")
+
+    def finish_run() -> None:
+        nonlocal in_flight, worker_process, progress_queue
+        in_flight = False
+        if worker_process is not None:
+            worker_process.join()
+        worker_process = None
+        progress_queue = None
+        progress_timer.deactivate()
+        busy.set_visibility(False)
+        progress_row.set_visibility(False)
+        run_button.enable()
+        for field in ui_inputs:
+            field.enable()
+
+    def poll_progress() -> None:
+        nonlocal worker_process, progress_queue
+        if not in_flight:
+            return
+        terminal: tuple[str, Any] | None = None
+        if progress_queue is not None:
+            while True:
+                try:
+                    kind, payload = progress_queue.get_nowait()
+                except _EmptyQueue:
+                    break
+                if kind == "progress":
+                    event: SolverProgressEvent = payload
+                    fraction = max(_progress_fraction(event), 0.02)
+                    progress_bar.set_value(min(fraction, 1.0))
+                    progress_detail.set_text(_progress_detail(event))
+                else:
+                    terminal = (kind, payload)
+                    break
+        if terminal is not None:
+            progress_bar.set_value(1.0)
+            progress_detail.set_text("Finalizing...")
+            snapshot, resolved = pending_snapshot, pending_resolved
+            finish_run()
+            if terminal[0] == "done":
+                assert snapshot is not None and resolved is not None
+                accept_run(snapshot, resolved, terminal[1])
+            else:
+                reject_run(terminal[1])
+        elif (
+            worker_process is not None
+            and not worker_process.is_alive()
+            and (progress_queue is None or progress_queue.empty())
+        ):
+            finish_run()
+            reject_run("background solver exited without a result")
+
+    progress_timer = ui.timer(_PROGRESS_POLL_SECONDS, poll_progress, active=False)
+
+    def execute_run() -> None:
+        nonlocal in_flight, worker_process, progress_queue
+        nonlocal pending_snapshot, pending_resolved, run_started_at
         if in_flight:
             return
         try:
@@ -216,64 +352,15 @@ def create_page(config_path: str | Path = DEFAULT_CONFIG) -> None:
             field.disable()
         busy.set_visibility(True)
         error_label.set_text("")
-        status_label.set_text("Solving three cases...")
-        try:
-            resolved = snapshot.to_si()
-            results = await run.cpu_bound(solve_all_cases, resolved)
-            if results is None:
-                raise SolverError("background calculation returned no result")
-        # NiceGUI must present worker and numerical failures to the user.
-        except Exception as error:
-            error_label.set_text(f"Run failed: {error}")
-            status_label.set_text("Last run failed; no new figure was accepted")
-        else:
-            completed = _CompletedRun(snapshot, resolved, results)
-            chart.update_figure(_figure(results))
-            diagnostics_card.clear()
-            with diagnostics_card:
-                ui.label("Accepted diagnostics").classes("text-xl font-bold")
-                rows = []
-                for result in results:
-                    diagnostics = result.diagnostics
-                    maximum_error = max(
-                        diagnostics.maximum_boundary_residual,
-                        diagnostics.voltage_relative_error,
-                        diagnostics.poisson_scaled_residual,
-                        diagnostics.continuity_scaled_residual,
-                    )
-                    rows.append(
-                        {
-                            "case": result.case_name,
-                            "elapsed_s": f"{diagnostics.elapsed_seconds:.3f}",
-                            "nodes": diagnostics.node_count,
-                            "current": f"{diagnostics.current_density_a_per_m2:.6g}",
-                            "max_residual": f"{maximum_error:.3g}",
-                        }
-                    )
-                ui.table(
-                    columns=[
-                        {"name": "case", "label": "Case", "field": "case"},
-                        {"name": "elapsed_s", "label": "Elapsed (s)", "field": "elapsed_s"},
-                        {"name": "nodes", "label": "Nodes", "field": "nodes"},
-                        {"name": "current", "label": "Current (A/m^2)", "field": "current"},
-                        {
-                            "name": "max_residual",
-                            "label": "Max scaled error",
-                            "field": "max_residual",
-                        },
-                    ],
-                    rows=rows,
-                    row_key="case",
-                ).classes("w-full")
-            elapsed = sum(result.diagnostics.elapsed_seconds for result in results)
-            status_label.set_text(f"Last completed run passed ({elapsed:.3f} s solver time)")
-            save_button.enable()
-        finally:
-            in_flight = False
-            busy.set_visibility(False)
-            run_button.enable()
-            for field in ui_inputs:
-                field.enable()
+        progress_row.set_visibility(True)
+        progress_bar.set_value(0.02)
+        progress_detail.set_text("Starting solver...")
+        status_label.set_text("Solving barrier cases...")
+        run_started_at = perf_counter()
+        pending_snapshot = snapshot
+        pending_resolved = snapshot.to_si()
+        worker_process, progress_queue = start_solver_worker(pending_resolved)
+        progress_timer.activate()
 
     def save_completed_run() -> None:
         if completed is None:
