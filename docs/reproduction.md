@@ -137,23 +137,22 @@ Pydantic now reports both as validation errors before worker startup, covered by
 Run, edit/Run/Save, validation messages, failed-run plot preservation, and opening the saved PNG.
 Headless callback checks do not establish browser rendering or Windows-to-WSL responsiveness.
 
-Local verification: `uv run pytest` passed all 32 tests; `uv run ruff check .`,
+Local verification: `uv run pytest` passed all 38 tests; `uv run ruff check .`,
 `uv run ruff format --check .`, and `uv run prek run --all-files` passed.
 
 ## Known limitations and next decision
 
 - The tabulated vacancy baseline implies **139.96 Hz**, versus the stated experimental **200 Hz**:
   200 Hz is about 43% higher (the model value is about 30% lower). No mobility/density calibration was applied.
-- The charged Fe fraction and equilibrium defect chemistry remain unspecified. The model sets `n0=p0=0`
-  with fixed compensation equivalent to `2 c_v`; total Fe is not imposed as fully ionized acceptors.
+- The recorded reproduction uses the default `n0=p0=0` background with fixed compensation equivalent to `2 c_v`.
+  The optional quenched-equilibrium mode calculates Fe charge states and equilibrium carriers using the specified
+  vacancy density, but has not been claimed as the authors' exact unpublished closure.
 - Uniform prescribed vacancies with finite drift current do not describe long-time ionic redistribution.
   This is a drift-only, isothermal, fixed-background electronic approximation, with conventional parabolic DOS.
 - Constant bimolecular recombination approximates indirect-gap SrTiO3. The paper's Figure 4 caption has
   inconsistent K units; the implementation uses the body/equation-consistent `cm³/s` input convention.
 - Author code/data and calibrated digitized curves are unavailable. No experimental impedance/time evolution,
-  fitted defect chemistry, or exact quantitative reproduction is claimed.
+  fitted annealing defect chemistry, or exact quantitative reproduction is claimed.
 
 **Recommended next scientific step:** digitize Figure 4(b) with axis calibration and uncertainty, then
-quantify profile discrepancies before changing physics. Background/defect-chemistry provenance is the
-priority if absolute agreement is the goal. Which observed limitation is most worth addressing next:
-quantitative curve comparison, the background discrepancy, or an issue encountered in the browser workflow?
+quantify profile discrepancies for both background modes before changing further physics.

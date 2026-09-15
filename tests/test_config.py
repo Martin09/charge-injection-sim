@@ -4,7 +4,7 @@ import pytest
 from pydantic import ValidationError
 from scipy.constants import electron_mass, elementary_charge
 
-from charge_injection_sim.config import InputConfig, load_config, load_inputs
+from charge_injection_sim.config import BackgroundModel, InputConfig, load_config, load_inputs
 
 BENCHMARK_PATH = Path(__file__).parents[1] / "configs" / "figure4b.toml"
 
@@ -15,6 +15,7 @@ def test_benchmark_loads_with_expected_cases() -> None:
     assert config.experiment.temperature_k == pytest.approx(483.15)
     assert [case.electron_barrier_ev for case in config.cases] == [1.0, 0.85, 0.8]
     assert config.solver.maximum_nodes == 20_000
+    assert config.background.model is BackgroundModel.SIMPLIFIED
 
 
 def test_literature_units_convert_to_si() -> None:
@@ -39,6 +40,44 @@ def test_resolved_inputs_serialize_to_json() -> None:
 
     assert restored == resolved
     assert restored.model_assumptions
+
+
+def test_quenched_equilibrium_background_matches_benchmark_defect_chemistry() -> None:
+    data = load_config(BENCHMARK_PATH).model_dump()
+    data["background"]["model"] = "quenched_equilibrium"
+
+    resolved = InputConfig.model_validate(data).to_si()
+    background = resolved.background
+
+    assert background.electron_m3 == pytest.approx(2.074e7, rel=5e-4)
+    assert background.hole_m3 == pytest.approx(1.4764e16, rel=5e-4)
+    assert background.charged_fe3_m3 == pytest.approx(4.86e24, rel=5e-8)
+    assert background.neutral_fe4_m3 == pytest.approx(7.20e23, rel=5e-8)
+    assert background.charged_fe3_m3 is not None
+    charge_residual = (
+        2.0 * resolved.material.oxygen_vacancy_m3
+        + background.hole_m3
+        - background.charged_fe3_m3
+        - background.electron_m3
+    )
+    assert abs(charge_residual) / resolved.material.reported_total_fe_m3 < 1e-12
+
+
+def test_unknown_background_model_is_rejected() -> None:
+    data = load_config(BENCHMARK_PATH).model_dump()
+    data["background"]["model"] = "fully_ionized_fe"
+
+    with pytest.raises(ValidationError):
+        InputConfig.model_validate(data)
+
+
+def test_missing_background_uses_simplified_model() -> None:
+    data = load_config(BENCHMARK_PATH).model_dump()
+    del data["background"]
+
+    config = InputConfig.model_validate(data)
+
+    assert config.background.model is BackgroundModel.SIMPLIFIED
 
 
 def test_load_inputs_rejects_unknown_file_type(tmp_path: Path) -> None:

@@ -10,9 +10,10 @@ from typing import Any
 import plotly.graph_objects as go
 from nicegui import ui
 from pydantic import ValidationError
+from scipy.constants import elementary_charge
 
 from charge_injection_sim.config import (
-    MODEL_ASSUMPTIONS,
+    BackgroundModel,
     InputConfig,
     ResolvedInputsSI,
     load_config,
@@ -35,7 +36,9 @@ class _CompletedRun:
     results: tuple[SimulationResult, ...]
 
 
-def _figure(results: tuple[SimulationResult, ...]) -> go.Figure:
+def _figure(
+    results: tuple[SimulationResult, ...], barriers_ev: tuple[float, ...] = ()
+) -> go.Figure:
     colors = ("black", "red", "blue")
     figure = go.Figure()
     for index, result in enumerate(results):
@@ -43,7 +46,11 @@ def _figure(results: tuple[SimulationResult, ...]) -> go.Figure:
             x=result.position_m * 100.0,
             y=result.total_conductivity_s_per_m * 0.01,
             mode="lines",
-            name=result.case_name,
+            name=(
+                f"Case {index + 1}: {barriers_ev[index]:g} eV"
+                if index < len(barriers_ev)
+                else f"Case {index + 1}"
+            ),
             line={"color": colors[index] if index < len(colors) else None, "width": 2.5},
         )
     figure.update_layout(
@@ -66,6 +73,40 @@ def _validation_message(error: ValidationError) -> str:
     return "\n".join(lines)
 
 
+def _background_summary(resolved: ResolvedInputsSI) -> str:
+    """Return a compact, user-facing description of the resolved background."""
+    background = resolved.background
+    if background.model is BackgroundModel.SIMPLIFIED:
+        return (
+            "Simplified neutral background\n"
+            "Equilibrium electrons and holes: neglected\n"
+            "Compensating charge: 2 x specified oxygen-vacancy density"
+        )
+    material = resolved.material
+    assert background.charged_fe3_m3 is not None and background.neutral_fe4_m3 is not None
+    charged_fraction = 100.0 * background.charged_fe3_m3 / material.reported_total_fe_m3
+    vacancy_sigma = (
+        2.0
+        * elementary_charge
+        * material.oxygen_vacancy_mobility_m2_per_v_s
+        * material.oxygen_vacancy_m3
+    )
+    electronic_sigma = elementary_charge * (
+        material.electron_mobility_m2_per_v_s * background.electron_m3
+        + material.hole_mobility_m2_per_v_s * background.hole_m3
+    )
+    conductivity_fraction = 100.0 * electronic_sigma / vacancy_sigma
+    return (
+        "Calculated quenched equilibrium (Denk constants)\n"
+        f"Charged Fe3+: {background.charged_fe3_m3 / 1e6:.3e} cm^-3 "
+        f"({charged_fraction:.1f}% of total Fe)\n"
+        f"Neutral Fe4+: {background.neutral_fe4_m3 / 1e6:.3e} cm^-3\n"
+        f"Equilibrium holes: {background.hole_m3 / 1e6:.3e} cm^-3\n"
+        f"Equilibrium electrons: {background.electron_m3 / 1e6:.3e} cm^-3\n"
+        f"Electronic background: {conductivity_fraction:.1f}% of vacancy conductivity"
+    )
+
+
 def create_page(config_path: str | Path = DEFAULT_CONFIG) -> None:
     """Create the single-page UI from a validated startup configuration."""
     initial = load_config(config_path)
@@ -86,8 +127,8 @@ def create_page(config_path: str | Path = DEFAULT_CONFIG) -> None:
             "position runs from anode to cathode."
         ).classes("text-base text-gray-700")
         ui.label(
-            "Background approximation: equilibrium electrons and holes are neglected "
-            "(n0 = p0 = 0), with fixed compensating charge for the prescribed vacancy density."
+            "Choose either the original simplified background or calculate equilibrium carriers "
+            "and Fe charge states for the specified, quenched vacancy density."
         ).classes("scientific-note text-sm text-gray-800")
 
         status_label = ui.label("No completed run").classes("font-medium text-gray-700")
@@ -95,6 +136,14 @@ def create_page(config_path: str | Path = DEFAULT_CONFIG) -> None:
         with ui.row().classes("w-full items-start gap-5"):
             with ui.card().classes("w-full lg:w-80 p-5 gap-3"):
                 ui.label("Run parameters").classes("text-xl font-bold")
+                background_model = ui.select(
+                    options={
+                        BackgroundModel.SIMPLIFIED.value: "Simplified background",
+                        BackgroundModel.QUENCHED_EQUILIBRIUM.value: "Calculated equilibrium",
+                    },
+                    value=initial.background.model.value,
+                    label="Background defect chemistry",
+                ).classes("w-full")
                 temperature = ui.number(
                     "Temperature (K)", value=initial.experiment.temperature_k, format="%.4g"
                 ).classes("w-full")
@@ -111,11 +160,11 @@ def create_page(config_path: str | Path = DEFAULT_CONFIG) -> None:
                 ).classes("w-full")
                 barrier_inputs = [
                     ui.number(
-                        f"{case.name} paired barrier (eV)",
+                        f"Case {index + 1} paired barrier (eV)",
                         value=case.electron_barrier_ev,
                         format="%.4g",
                     ).classes("w-full")
-                    for case in initial.cases
+                    for index, case in enumerate(initial.cases)
                 ]
 
                 with ui.row().classes("items-center gap-3"):
@@ -133,6 +182,11 @@ def create_page(config_path: str | Path = DEFAULT_CONFIG) -> None:
 
             with ui.column().classes("grow min-w-0 gap-5"):
                 chart = ui.plotly(_figure(())).classes("w-full h-[32rem]")
+                with ui.card().classes("w-full p-4 gap-1"):
+                    ui.label("Initial background").classes("text-lg font-bold")
+                    background_summary = ui.label(_background_summary(initial.to_si())).classes(
+                        "whitespace-pre-line text-sm text-gray-700"
+                    )
                 diagnostics_card = ui.card().classes("w-full p-5")
                 with diagnostics_card:
                     ui.label("Diagnostics will appear after a successful run.")
@@ -171,8 +225,9 @@ def create_page(config_path: str | Path = DEFAULT_CONFIG) -> None:
         with ui.expansion("Model assumptions", icon="info").classes(
             "w-full bg-white scientific-note"
         ):
-            for assumption in MODEL_ASSUMPTIONS:
-                ui.label(f"- {assumption}")
+            assumption_summary = ui.label(
+                "\n".join(f"- {item}" for item in initial.to_si().model_assumptions)
+            ).classes("whitespace-pre-line")
 
     def edited_snapshot() -> InputConfig:
         data: dict[str, Any] = initial.model_dump()
@@ -181,6 +236,7 @@ def create_page(config_path: str | Path = DEFAULT_CONFIG) -> None:
             voltage_v=voltage.value,
             thickness_um=thickness.value,
         )
+        data["background"]["model"] = background_model.value
         data["material"]["recombination_cm3_per_s"] = recombination.value
         for key, material_input in zip(material_keys, material_inputs, strict=True):
             data["material"][key] = material_input.value
@@ -192,6 +248,7 @@ def create_page(config_path: str | Path = DEFAULT_CONFIG) -> None:
         return InputConfig.model_validate(data)
 
     ui_inputs = [
+        background_model,
         temperature,
         voltage,
         thickness,
@@ -202,6 +259,15 @@ def create_page(config_path: str | Path = DEFAULT_CONFIG) -> None:
     ]
 
     def mark_edited() -> None:
+        try:
+            preview = edited_snapshot().to_si()
+        except ValidationError, ValueError:
+            background_summary.set_text("Enter valid inputs to calculate the background preview.")
+        else:
+            background_summary.set_text(_background_summary(preview))
+            assumption_summary.set_text(
+                "\n".join(f"- {item}" for item in preview.model_assumptions)
+            )
         if completed is not None:
             status_label.set_text("Inputs changed; plot shows the last completed run")
 
@@ -226,8 +292,9 @@ def create_page(config_path: str | Path = DEFAULT_CONFIG) -> None:
         return f"elapsed {elapsed:.0f} s, ~{remaining:.0f} s remaining"
 
     def _progress_detail(event: SolverProgressEvent) -> str:
+        case_label = event.current_case.replace("_", " ").title()
         return (
-            f"{event.current_case} (case {event.completed_cases + 1} of "
+            f"{case_label} (case {event.completed_cases + 1} of "
             f"{event.total_cases}, continuation step {event.case_steps_done} of "
             f"{event.case_steps_total}, {event.node_count} nodes): {_eta_text(event)}"
         )
@@ -235,12 +302,14 @@ def create_page(config_path: str | Path = DEFAULT_CONFIG) -> None:
     def accept_run(snapshot: InputConfig, resolved: ResolvedInputsSI, results) -> None:
         nonlocal completed
         completed = _CompletedRun(snapshot, resolved, results)
-        chart.update_figure(_figure(results))
+        chart.update_figure(
+            _figure(results, tuple(case.electron_barrier_ev for case in snapshot.cases))
+        )
         diagnostics_card.clear()
         with diagnostics_card:
             ui.label("Accepted diagnostics").classes("text-xl font-bold")
             rows = []
-            for result in results:
+            for index, result in enumerate(results):
                 diagnostics = result.diagnostics
                 maximum_error = max(
                     diagnostics.maximum_boundary_residual,
@@ -250,7 +319,7 @@ def create_page(config_path: str | Path = DEFAULT_CONFIG) -> None:
                 )
                 rows.append(
                     {
-                        "case": result.case_name,
+                        "case": f"Case {index + 1}",
                         "elapsed_s": f"{diagnostics.elapsed_seconds:.3f}",
                         "nodes": diagnostics.node_count,
                         "current": f"{diagnostics.current_density_a_per_m2:.6g}",
@@ -273,7 +342,14 @@ def create_page(config_path: str | Path = DEFAULT_CONFIG) -> None:
                 row_key="case",
             ).classes("w-full")
         elapsed = sum(result.diagnostics.elapsed_seconds for result in results)
-        status_label.set_text(f"Last completed run passed ({elapsed:.3f} s solver time)")
+        mode_label = (
+            "calculated equilibrium"
+            if resolved.background.model is BackgroundModel.QUENCHED_EQUILIBRIUM
+            else "simplified background"
+        )
+        status_label.set_text(
+            f"Last completed run passed using {mode_label} ({elapsed:.3f} s solver time)"
+        )
         save_button.enable()
 
     def reject_run(message: str) -> None:

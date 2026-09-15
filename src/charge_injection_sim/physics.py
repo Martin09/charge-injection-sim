@@ -59,6 +59,8 @@ class CasePhysics:
     vacancy_conductivity_s_per_m: float
     electron_contact_m3: float
     hole_contact_m3: float
+    equilibrium_electron_m3: float
+    equilibrium_hole_m3: float
     electron_scale_m3: float
     hole_scale_m3: float
     conductivity_scale_s_per_m: float
@@ -69,6 +71,7 @@ class CasePhysics:
     lambda_electron: float
     lambda_hole: float
     rho_hole: float
+    equilibrium_product_scaled: float
 
     @property
     def electron_contact_scaled(self) -> float:
@@ -77,6 +80,14 @@ class CasePhysics:
     @property
     def hole_contact_scaled(self) -> float:
         return self.hole_contact_m3 / self.hole_scale_m3
+
+    @property
+    def equilibrium_electron_scaled(self) -> float:
+        return self.equilibrium_electron_m3 / self.electron_scale_m3
+
+    @property
+    def equilibrium_hole_scaled(self) -> float:
+        return self.equilibrium_hole_m3 / self.hole_scale_m3
 
 
 def prepare_case(
@@ -115,10 +126,12 @@ def prepare_case(
     # density, and avoid reconstructing a small carrier by catastrophic subtraction.
     electron_scale = max(
         electron_contact,
+        inputs.background.electron_m3,
         vacancy_conductivity / (elementary_charge * material.electron_mobility_m2_per_v_s),
     )
     hole_scale = max(
         hole_contact,
+        inputs.background.hole_m3,
         vacancy_conductivity / (elementary_charge * material.hole_mobility_m2_per_v_s),
     )
     electron_conductivity_scale = (
@@ -143,6 +156,8 @@ def prepare_case(
         vacancy_conductivity_s_per_m=vacancy_conductivity,
         electron_contact_m3=electron_contact,
         hole_contact_m3=hole_contact,
+        equilibrium_electron_m3=inputs.background.electron_m3,
+        equilibrium_hole_m3=inputs.background.hole_m3,
         electron_scale_m3=electron_scale,
         hole_scale_m3=hole_scale,
         conductivity_scale_s_per_m=conductivity_scale,
@@ -167,6 +182,11 @@ def prepare_case(
             * hole_scale
             * experiment.thickness_m
             / (material.electron_mobility_m2_per_v_s * electric_field_scale)
+        ),
+        equilibrium_product_scaled=(
+            inputs.background.electron_m3
+            * inputs.background.hole_m3
+            / (electron_scale * hole_scale)
         ),
     )
 
@@ -199,9 +219,15 @@ def scaled_rhs(
     log_current = float(parameters[0])
     current = np.exp(log_current)
     hole = reconstruct_holes_scaled(electric_field, electron, log_current, physics)
-    field_derivative = homotopy * (physics.lambda_hole * hole - physics.lambda_electron * electron)
+    field_derivative = homotopy * (
+        physics.lambda_hole * (hole - physics.equilibrium_hole_scaled)
+        - physics.lambda_electron * (electron - physics.equilibrium_electron_scaled)
+    )
     electron_derivative = (
-        homotopy * physics.rho_hole * electron * hole / electric_field
+        homotopy
+        * physics.rho_hole
+        * (electron * hole - physics.equilibrium_product_scaled)
+        / electric_field
         - (electron / electric_field)
         * (1.0 + physics.gamma_vacancy * electric_field / current)
         * field_derivative

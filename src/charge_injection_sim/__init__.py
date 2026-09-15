@@ -2,6 +2,7 @@
 
 from charge_injection_sim.config import (
     MODEL_ASSUMPTIONS,
+    BackgroundModel,
     InputConfig,
     ResolvedInputsSI,
     load_config,
@@ -18,6 +19,7 @@ from charge_injection_sim.solver import (
 
 __all__ = [
     "MODEL_ASSUMPTIONS",
+    "BackgroundModel",
     "InputConfig",
     "ResolvedInputsSI",
     "SimulationResult",

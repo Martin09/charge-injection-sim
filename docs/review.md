@@ -118,8 +118,8 @@ barriers should not be enforced as mirror-symmetric boundary densities.
 - Homogeneous 1D, isothermal, drift-only transport; no diffusion, field-dependent mobility, tunneling, or
   field-induced Schottky barrier lowering beyond the supplied barrier values.
 - Prescribed uniform vacancy density with finite ionic drift conductivity; no vacancy evolution equation.
-- `n0 = p0 = 0` as a negligible-electronic-background approximation, with fixed compensating charge
-  equivalent to `2 c_VO`. Total Fe is provenance information, not independently imposed charged acceptor density.
+- The default uses `n0 = p0 = 0` with fixed compensating charge equivalent to `2 c_VO`. The optional quenched mode
+  calculates `n0`, `p0`, Fe3+, and Fe4+ from the Denk equilibria without treating total Fe as fully ionized.
 - Equation (4) is read as a boundary condition on total `n`/`p` (as typeset), even though the prose calls them injected.
   The distinction vanishes for the prototype's zero electronic background; revisit before adding nonzero backgrounds.
 - Constant bimolecular `K = 1e-14 m^3/s`, not a fitted parameter or an SRH/Auger kinetics implementation.

@@ -113,10 +113,19 @@ The initial benchmark described in the paper uses:
 All values are converted to SI units before calculation. Literature values and numerical settings remain
 distinguishable in code and generated metadata; the benchmark uses no fitted values.
 
-These numbers do **not** fully specify the equilibrium defect chemistry. Substituting total Fe for charged acceptors
-in Equation (2) implies a large hole background incompatible with the stated vacancy-dominated conductivity.
-The prototype explicitly assumes negligible equilibrium electrons/holes and a compensating fixed charge
-background. This is an approximation, not a solved Fe defect-chemistry model.
+Substituting total Fe for charged acceptors in Equation (2) implies a large hole background incompatible with the
+stated vacancy-dominated conductivity. The simulator therefore offers two explicit background models:
+
+- `simplified` (default) neglects equilibrium electrons and holes and uses fixed compensation equal to twice the
+  specified vacancy density;
+- `quenched_equilibrium` treats the specified vacancy density as frozen and solves Fe3+/Fe4+ ionization, intrinsic
+  electron-hole equilibrium, Fe conservation, and charge neutrality at the simulation temperature using the Denk
+  constants reported by Wang et al. (2016) in [`defectivity_paper.pdf`](defectivity_paper.pdf).
+
+For the benchmark, the calculated mode gives approximately 87.1% charged Fe3+, `p0 = 1.48 x 10^10 cm^-3`, and
+`n0 = 21 cm^-3`. Its equilibrium electronic conductivity is about 5.7% of the vacancy conductivity. The web app shows
+these resolved values before a run. This mode calculates the equilibrium background only; it does not evolve vacancies
+or continuously re-equilibrate Fe in response to injected charge.
 
 As an independently calculated check, the tabulated vacancy concentration and mobility give
 `sigma_VO = 1.713 x 10^-6 S/m = 1.713 x 10^-8 S/cm`. They imply a homogeneous dielectric relaxation frequency of
@@ -145,7 +154,8 @@ strategy needed for an exact reproduction. Before treating results as quantitati
 
 - how electron and hole concentrations are coupled when integrating the reduced equation;
 - how the unknown current density is selected to satisfy both contact and voltage constraints;
-- which defect-chemistry values define the equilibrium electron and hole concentrations; and
+- whether the Denk quenched-equilibrium constants and the paper's total-density contact convention match the authors'
+  unpublished implementation; and
 - how sensitive the result is to explicit background and contact assumptions without access to the authors' code.
 
 These uncertainties should be documented rather than absorbed into fitted constants.

@@ -23,7 +23,7 @@ repos:
     hooks:
       - id: check-added-large-files
         args: [--maxkb=1024]
-        exclude: ^ref_paper\.pdf$
+        exclude: ^(ref_paper|defectivity_paper)\.pdf$
       - id: check-case-conflict
       - id: check-merge-conflict
       - id: check-json

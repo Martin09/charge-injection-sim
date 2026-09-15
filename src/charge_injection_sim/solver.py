@@ -205,8 +205,11 @@ def _diagnose(
         scaled_derivative[0] * physics.electric_field_scale_v_per_m / physics.length_m
     )
     electron_derivative = scaled_derivative[1] * physics.electron_scale_m3 / physics.length_m
-    poisson_residual = field_derivative - elementary_charge * (hole - electron) / (
-        physics.permittivity_f_per_m
+    poisson_residual = (
+        field_derivative
+        - elementary_charge
+        * ((hole - physics.equilibrium_hole_m3) - (electron - physics.equilibrium_electron_m3))
+        / physics.permittivity_f_per_m
     )
     electron_current = electron_sigma * electric_field
     electron_current_derivative = (
@@ -218,7 +221,9 @@ def _diagnose(
     continuity_residual = (
         electron_current_derivative
         + electron_current / current_density * vacancy_current_derivative
-        - elementary_charge * physics.recombination_m3_per_s * electron * hole
+        - elementary_charge
+        * physics.recombination_m3_per_s
+        * (electron * hole - physics.equilibrium_electron_m3 * physics.equilibrium_hole_m3)
     )
     boundary = scaled_boundary_residuals(solution.y[:, 0], solution.y[:, -1], solution.p, physics)
     cancellation = (

@@ -67,6 +67,7 @@ def test_saved_inputs_round_trip_and_csv_preserves_si_values(tmp_path: Path) -> 
     ] == pytest.approx(5e-4)
     metadata = json.loads((saved / "metadata.json").read_text())
     assert metadata["status"] == "passed"
+    assert metadata["background_model"] == "simplified"
     assert metadata["model_assumptions"] == list(resolved.model_assumptions)
     assert metadata["solver_settings"] == resolved.solver.model_dump(mode="json")
     assert set(metadata["git"]) == {"revision", "dirty"}

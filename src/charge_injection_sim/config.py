@@ -1,19 +1,25 @@
 """Validated configuration loading and conversion to SI units."""
 
 import tomllib
+from enum import StrEnum
 from pathlib import Path
 from typing import Annotated, Self
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 from scipy.constants import electron_mass, elementary_charge
 
-MODEL_ASSUMPTIONS = (
+from charge_injection_sim.defect_chemistry import quenched_fe_equilibrium
+
+COMMON_MODEL_ASSUMPTIONS = (
     "homogeneous one-dimensional isothermal drift-only transport",
     "uniform prescribed oxygen-vacancy density with finite drift conductivity",
-    "negligible equilibrium electron and hole densities (n0 = p0 = 0)",
-    "fixed compensating charge equivalent to twice the oxygen-vacancy density",
     "constant bimolecular recombination coefficient",
     "no diffusion, field-dependent transport, trap kinetics, or vacancy evolution",
+)
+MODEL_ASSUMPTIONS = (
+    *COMMON_MODEL_ASSUMPTIONS,
+    "negligible equilibrium electron and hole densities (n0 = p0 = 0)",
+    "fixed compensating charge equivalent to twice the oxygen-vacancy density",
 )
 
 PositiveFloat = Annotated[float, Field(gt=0, allow_inf_nan=False)]
@@ -25,6 +31,19 @@ class FrozenModel(BaseModel):
     """Base for immutable models with a closed configuration schema."""
 
     model_config = ConfigDict(frozen=True, extra="forbid")
+
+
+class BackgroundModel(StrEnum):
+    """Available treatments of the neutral equilibrium background."""
+
+    SIMPLIFIED = "simplified"
+    QUENCHED_EQUILIBRIUM = "quenched_equilibrium"
+
+
+class BackgroundInputs(FrozenModel):
+    """Choice of equilibrium-background treatment."""
+
+    model: BackgroundModel = BackgroundModel.SIMPLIFIED
 
 
 class MaterialInputs(FrozenModel):
@@ -101,11 +120,22 @@ class BarrierCaseSI(FrozenModel):
     hole_barrier_j: NonNegativeFloat
 
 
+class BackgroundSI(FrozenModel):
+    """Resolved equilibrium background concentrations in SI units."""
+
+    model: BackgroundModel
+    electron_m3: NonNegativeFloat
+    hole_m3: NonNegativeFloat
+    charged_fe3_m3: NonNegativeFloat | None
+    neutral_fe4_m3: NonNegativeFloat | None
+
+
 class ResolvedInputsSI(FrozenModel):
     """Complete immutable numerical input snapshot in SI units."""
 
     material: MaterialSI
     experiment: ExperimentSI
+    background: BackgroundSI
     cases: tuple[BarrierCaseSI, ...]
     solver: SolverSettings
     model_assumptions: tuple[str, ...]
@@ -116,6 +146,7 @@ class InputConfig(FrozenModel):
 
     material: MaterialInputs
     experiment: ExperimentInputs
+    background: BackgroundInputs = BackgroundInputs()
     cases: tuple[BarrierCaseInputs, ...]
     solver: SolverSettings
 
@@ -132,11 +163,44 @@ class InputConfig(FrozenModel):
         """Convert literature-facing values once at the numerical boundary."""
         material = self.material
         experiment = self.experiment
+        total_fe_m3 = material.reported_total_fe_cm3 * 1e6
+        oxygen_vacancy_m3 = material.oxygen_vacancy_cm3 * 1e6
+        if self.background.model is BackgroundModel.QUENCHED_EQUILIBRIUM:
+            equilibrium = quenched_fe_equilibrium(
+                experiment.temperature_k,
+                total_fe_m3,
+                oxygen_vacancy_m3,
+            )
+            background = BackgroundSI(
+                model=self.background.model,
+                electron_m3=equilibrium.electron_m3,
+                hole_m3=equilibrium.hole_m3,
+                charged_fe3_m3=equilibrium.charged_fe3_m3,
+                neutral_fe4_m3=equilibrium.neutral_fe4_m3,
+            )
+            background_assumptions = (
+                "equilibrium carriers and Fe charge states follow the quenched Denk "
+                "defect chemistry",
+                "specified oxygen-vacancy density is frozen while electronic and Fe "
+                "equilibria re-establish",
+            )
+        else:
+            background = BackgroundSI(
+                model=self.background.model,
+                electron_m3=0.0,
+                hole_m3=0.0,
+                charged_fe3_m3=None,
+                neutral_fe4_m3=None,
+            )
+            background_assumptions = (
+                "negligible equilibrium electron and hole densities (n0 = p0 = 0)",
+                "fixed compensating charge equivalent to twice the oxygen-vacancy density",
+            )
         return ResolvedInputsSI(
             material=MaterialSI(
                 relative_permittivity=material.relative_permittivity,
-                reported_total_fe_m3=material.reported_total_fe_cm3 * 1e6,
-                oxygen_vacancy_m3=material.oxygen_vacancy_cm3 * 1e6,
+                reported_total_fe_m3=total_fe_m3,
+                oxygen_vacancy_m3=oxygen_vacancy_m3,
                 electron_effective_mass_kg=(material.electron_effective_mass_m0 * electron_mass),
                 hole_effective_mass_kg=material.hole_effective_mass_m0 * electron_mass,
                 electron_mobility_m2_per_v_s=(material.electron_mobility_cm2_per_v_s * 1e-4),
@@ -151,6 +215,7 @@ class InputConfig(FrozenModel):
                 voltage_v=experiment.voltage_v,
                 thickness_m=experiment.thickness_um * 1e-6,
             ),
+            background=background,
             cases=tuple(
                 BarrierCaseSI(
                     name=case.name,
@@ -160,7 +225,7 @@ class InputConfig(FrozenModel):
                 for case in self.cases
             ),
             solver=self.solver,
-            model_assumptions=MODEL_ASSUMPTIONS,
+            model_assumptions=COMMON_MODEL_ASSUMPTIONS + background_assumptions,
         )
 
 

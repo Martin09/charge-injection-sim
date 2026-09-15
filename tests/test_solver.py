@@ -7,7 +7,7 @@ from scipy.integrate import quad
 from scipy.optimize import brentq
 
 from charge_injection_sim import load_config
-from charge_injection_sim.config import ResolvedInputsSI
+from charge_injection_sim.config import InputConfig, ResolvedInputsSI
 from charge_injection_sim.solver import (
     SolverError,
     SolverProgressEvent,
@@ -75,6 +75,36 @@ def test_charge_neutral_ohmic_limit() -> None:
     )
     assert np.trapezoid(result.electric_field_v_per_m, result.position_m) == pytest.approx(
         inputs.experiment.voltage_v, rel=2e-7
+    )
+
+
+def test_quenched_equilibrium_ohmic_limit() -> None:
+    data = load_config(BENCHMARK_PATH).model_dump()
+    data["background"]["model"] = "quenched_equilibrium"
+    inputs = InputConfig.model_validate(data).to_si()
+    background = inputs.background
+
+    result = solve_case(
+        inputs,
+        inputs.cases[0],
+        electron_contact_m3=background.electron_m3,
+        hole_contact_m3=background.hole_m3,
+    )
+
+    expected_field = inputs.experiment.voltage_v / inputs.experiment.thickness_m
+    expected_sigma = (
+        2.0
+        * elementary_charge
+        * inputs.material.oxygen_vacancy_mobility_m2_per_v_s
+        * inputs.material.oxygen_vacancy_m3
+        + elementary_charge * inputs.material.electron_mobility_m2_per_v_s * background.electron_m3
+        + elementary_charge * inputs.material.hole_mobility_m2_per_v_s * background.hole_m3
+    )
+    np.testing.assert_allclose(result.electric_field_v_per_m, expected_field, rtol=2e-7)
+    np.testing.assert_allclose(result.electron_m3, background.electron_m3, rtol=2e-7)
+    np.testing.assert_allclose(result.hole_m3, background.hole_m3, rtol=2e-7)
+    assert result.diagnostics.current_density_a_per_m2 == pytest.approx(
+        expected_sigma * expected_field, rel=2e-7
     )
 
 

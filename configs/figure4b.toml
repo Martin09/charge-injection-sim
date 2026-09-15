@@ -14,18 +14,21 @@ temperature_k = 483.15
 voltage_v = 40.0
 thickness_um = 500.0
 
+[background]
+model = "simplified"
+
 [[cases]]
-name = "barrier_1p00_ev"
+name = "case_1"
 electron_barrier_ev = 1.00
 hole_barrier_ev = 1.00
 
 [[cases]]
-name = "barrier_0p85_ev"
+name = "case_2"
 electron_barrier_ev = 0.85
 hole_barrier_ev = 0.85
 
 [[cases]]
-name = "barrier_0p80_ev"
+name = "case_3"
 electron_barrier_ev = 0.80
 hole_barrier_ev = 0.80
 

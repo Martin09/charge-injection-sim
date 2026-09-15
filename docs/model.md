@@ -12,15 +12,14 @@ differs from or cannot be verified against the published model.
 
 The temperature, voltage, thickness, relative permittivity, reported total Fe concentration, oxygen-vacancy
 concentration, effective masses, mobilities, recombination coefficient, and contact barriers come from the parameter
-paragraph and Figure 4(b) of the paper. The total Fe concentration is retained only as provenance. It is not treated as
-the concentration of ionized acceptors because the charged fraction and complete defect chemistry are unspecified.
+paragraph and Figure 4(b) of the paper. Total Fe is never treated as fully ionized acceptors. It is provenance in the
+default simplified mode and sets Fe mass conservation in the optional quenched-equilibrium mode.
 
 The prototype assumes:
 
 - homogeneous, one-dimensional, isothermal, drift-only transport;
 - a prescribed uniform oxygen-vacancy density with finite drift conductivity but no vacancy evolution;
-- negligible equilibrium electrons and holes, `n0 = p0 = 0`;
-- fixed compensating charge equivalent to twice the oxygen-vacancy density;
+- either a simplified compensated background with `n0 = p0 = 0`, or a calculated quenched Fe equilibrium;
 - a constant bimolecular recombination coefficient; and
 - no diffusion, field-dependent barriers or mobilities, trap kinetics, or tunneling.
 
@@ -47,8 +46,26 @@ The conventional parabolic-band density of states is
 N = 2 [2 pi m_eff k_B T / h^2]^(3/2).
 ```
 
-This factor-of-two convention is part of the model. Contact densities are interpreted as total carrier densities;
-with `n0 = p0 = 0`, they are also the injected densities.
+This factor-of-two convention is part of the model. Contact densities are interpreted as total carrier densities. This
+follows the literal 2017 equation; its prose instead calls them injected densities, so the distinction is an explicit
+uncertainty when the calculated background is enabled.
+
+## Optional quenched equilibrium
+
+The `quenched_equilibrium` background keeps the user-specified doubly ionized vacancy density fixed and solves at the
+simulation temperature:
+
+```text
+2 c_v + p0 = [Fe3+] + n0
+[Fe3+] + [Fe4+] = C_Fe
+K_R3 = [Fe3+] p0 / [Fe4+]
+K_R4 = n0 p0
+```
+
+`K_R3` and `K_R4` use the temperature-dependent Denk expressions tabulated by Wang et al. (2016). This is a quenched
+background calculation, not an annealing calculation: the mode does not derive `c_v` from annealing temperature or
+oxygen partial pressure. During charge injection, the resolved background remains fixed and only excess electronic
+charge enters Poisson's equation. Local Fe charge states are not re-equilibrated with injected carriers.
 
 ## Spatial boundary-value formulation
 
@@ -84,8 +101,9 @@ carrier species at both contacts. Equal barrier energies do not produce equal bo
 ## Numerical scaling
 
 The solver nondimensionalizes before calling `scipy.integrate.solve_bvp`. It uses `x_s=L`, `E_s=V/L`, and `U_s=V`.
-For each carrier, its concentration scale is the larger of its contact density and the density whose electronic
-conductivity equals `s_v`. Thus `n_s=max(n_c,s_v/(q mu_n))` and `p_s=max(p_a,s_v/(q mu_p))`. This keeps the scales
+For each carrier, its concentration scale is the largest of its contact density, equilibrium density, and the density
+whose electronic conductivity equals `s_v`. Thus `n_s=max(n_c,n0,s_v/(q mu_n))` and
+`p_s=max(p_a,p0,s_v/(q mu_p))`. This keeps the scales
 finite for zero-contact limiting cases and avoids combining carrier variables near zero with coefficients of order
 `10^7`, as the provisional `c_v` scale does for the benchmark.
 
@@ -95,8 +113,8 @@ Let `s_s=s_v+q mu_n n_s+q mu_p p_s`, `j_s=s_s E_s`, and define the conductivity 
 
 ```text
 P    = (J/e - gamma_v - gamma_n N) / gamma_p
-e'   = lambda_p P - lambda_n N
-N'   = rho_p N P/e - (N/e)(1 + gamma_v e/J)e'
+e'   = lambda_p (P - P0) - lambda_n (N - N0)
+N'   = rho_p (N P - N0 P0)/e - (N/e)(1 + gamma_v e/J)e'
 u'   = e
 ```
 

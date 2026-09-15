@@ -15,7 +15,7 @@ from matplotlib.figure import Figure
 from charge_injection_sim.config import InputConfig, ResolvedInputsSI
 from charge_injection_sim.solver import SimulationResult
 
-MODEL_VERSION = "figure4b-drift-bvp-v1"
+MODEL_VERSION = "figure4b-drift-bvp-v2-background-models"
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 CSV_COLUMNS = (
     "position_m",
@@ -74,7 +74,7 @@ def _write_case_csv(path: Path, result: SimulationResult) -> None:
         writer.writerows(zip(*arrays, strict=True))
 
 
-def _write_figure(path: Path, results: tuple[SimulationResult, ...]) -> None:
+def _write_figure(path: Path, inputs: InputConfig, results: tuple[SimulationResult, ...]) -> None:
     colors = ("black", "red", "blue")
     figure = Figure(figsize=(7.2, 4.8), constrained_layout=True)
     FigureCanvasAgg(figure)
@@ -84,7 +84,7 @@ def _write_figure(path: Path, results: tuple[SimulationResult, ...]) -> None:
             result.position_m * 100.0,
             result.total_conductivity_s_per_m * 0.01,
             color=colors[index] if index < len(colors) else None,
-            label=result.case_name,
+            label=f"Case {index + 1}: {inputs.cases[index].electron_barrier_ev:g} eV",
         )
     axes.set_yscale("log")
     axes.set_xlabel("Position, anode to cathode (cm)")
@@ -121,6 +121,7 @@ def save_run(
         "status": "passed",
         "package_version": _package_version(),
         "model_version": MODEL_VERSION,
+        "background_model": resolved_inputs.background.model.value,
         "coordinate_convention": "position_m increases from anode (left) to cathode (right)",
         "raw_data": "CSV files contain exact adaptive-solver-mesh arrays in SI units",
         "model_assumptions": list(resolved_inputs.model_assumptions),
@@ -131,5 +132,5 @@ def save_run(
     _write_json(output_path / "metadata.json", metadata)
     for result in results:
         _write_case_csv(output_path / f"{result.case_name}.csv", result)
-    _write_figure(output_path / "conductivity.png", results)
+    _write_figure(output_path / "conductivity.png", inputs, results)
     return output_path
