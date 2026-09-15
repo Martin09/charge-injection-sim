@@ -8,11 +8,11 @@ from typing import Annotated, Self
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 from scipy.constants import electron_mass, elementary_charge
 
-from charge_injection_sim.defect_chemistry import quenched_fe_equilibrium
+from charge_injection_sim.defect_chemistry import annealed_fe_equilibrium, quenched_fe_equilibrium
 
 COMMON_MODEL_ASSUMPTIONS = (
     "homogeneous one-dimensional isothermal drift-only transport",
-    "uniform prescribed oxygen-vacancy density with finite drift conductivity",
+    "uniform frozen oxygen-vacancy density with finite drift conductivity",
     "constant bimolecular recombination coefficient",
     "no diffusion, field-dependent transport, trap kinetics, or vacancy evolution",
 )
@@ -38,12 +38,20 @@ class BackgroundModel(StrEnum):
 
     SIMPLIFIED = "simplified"
     QUENCHED_EQUILIBRIUM = "quenched_equilibrium"
+    PREPARATION_EQUILIBRIUM = "preparation_equilibrium"
 
 
 class BackgroundInputs(FrozenModel):
     """Choice of equilibrium-background treatment."""
 
     model: BackgroundModel = BackgroundModel.SIMPLIFIED
+
+
+class PreparationInputs(FrozenModel):
+    """Sample preparation conditions used to establish the vacancy inventory."""
+
+    annealing_temperature_k: PositiveFloat
+    oxygen_partial_pressure_bar: PositiveFloat
 
 
 class MaterialInputs(FrozenModel):
@@ -112,6 +120,13 @@ class ExperimentSI(FrozenModel):
     thickness_m: PositiveFloat
 
 
+class PreparationSI(FrozenModel):
+    """Sample preparation conditions resolved to SI units."""
+
+    annealing_temperature_k: PositiveFloat
+    oxygen_partial_pressure_pa: PositiveFloat
+
+
 class BarrierCaseSI(FrozenModel):
     """One contact-barrier case resolved to joules."""
 
@@ -135,6 +150,7 @@ class ResolvedInputsSI(FrozenModel):
 
     material: MaterialSI
     experiment: ExperimentSI
+    preparation: PreparationSI
     background: BackgroundSI
     cases: tuple[BarrierCaseSI, ...]
     solver: SolverSettings
@@ -146,6 +162,7 @@ class InputConfig(FrozenModel):
 
     material: MaterialInputs
     experiment: ExperimentInputs
+    preparation: PreparationInputs
     background: BackgroundInputs = BackgroundInputs()
     cases: tuple[BarrierCaseInputs, ...]
     solver: SolverSettings
@@ -164,8 +181,23 @@ class InputConfig(FrozenModel):
         material = self.material
         experiment = self.experiment
         total_fe_m3 = material.reported_total_fe_cm3 * 1e6
-        oxygen_vacancy_m3 = material.oxygen_vacancy_cm3 * 1e6
-        if self.background.model is BackgroundModel.QUENCHED_EQUILIBRIUM:
+        preparation = PreparationSI(
+            annealing_temperature_k=self.preparation.annealing_temperature_k,
+            oxygen_partial_pressure_pa=self.preparation.oxygen_partial_pressure_bar * 1e5,
+        )
+        if self.background.model is BackgroundModel.PREPARATION_EQUILIBRIUM:
+            annealed = annealed_fe_equilibrium(
+                preparation.annealing_temperature_k,
+                preparation.oxygen_partial_pressure_pa,
+                total_fe_m3,
+            )
+            oxygen_vacancy_m3 = annealed.oxygen_vacancy_m3
+        else:
+            oxygen_vacancy_m3 = material.oxygen_vacancy_cm3 * 1e6
+        if self.background.model in (
+            BackgroundModel.QUENCHED_EQUILIBRIUM,
+            BackgroundModel.PREPARATION_EQUILIBRIUM,
+        ):
             equilibrium = quenched_fe_equilibrium(
                 experiment.temperature_k,
                 total_fe_m3,
@@ -178,12 +210,20 @@ class InputConfig(FrozenModel):
                 charged_fe3_m3=equilibrium.charged_fe3_m3,
                 neutral_fe4_m3=equilibrium.neutral_fe4_m3,
             )
-            background_assumptions = (
-                "equilibrium carriers and Fe charge states follow the quenched Denk "
-                "defect chemistry",
-                "specified oxygen-vacancy density is frozen while electronic and Fe "
-                "equilibria re-establish",
-            )
+            if self.background.model is BackgroundModel.PREPARATION_EQUILIBRIUM:
+                background_assumptions = (
+                    "oxygen-vacancy density follows Denk equilibrium at the specified "
+                    "annealing temperature and oxygen partial pressure",
+                    "the annealed oxygen-vacancy density is frozen while electronic and "
+                    "Fe equilibria re-establish at the simulation temperature",
+                )
+            else:
+                background_assumptions = (
+                    "equilibrium carriers and Fe charge states follow the quenched Denk "
+                    "defect chemistry",
+                    "specified oxygen-vacancy density is frozen while electronic and Fe "
+                    "equilibria re-establish",
+                )
         else:
             background = BackgroundSI(
                 model=self.background.model,
@@ -215,6 +255,7 @@ class InputConfig(FrozenModel):
                 voltage_v=experiment.voltage_v,
                 thickness_m=experiment.thickness_um * 1e-6,
             ),
+            preparation=preparation,
             background=background,
             cases=tuple(
                 BarrierCaseSI(

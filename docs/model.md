@@ -18,7 +18,8 @@ default simplified mode and sets Fe mass conservation in the optional quenched-e
 The prototype assumes:
 
 - homogeneous, one-dimensional, isothermal, drift-only transport;
-- a prescribed uniform oxygen-vacancy density with finite drift conductivity but no vacancy evolution;
+- a uniform frozen oxygen-vacancy density, either prescribed or calculated from preparation conditions, with finite
+  drift conductivity but no vacancy evolution;
 - either a simplified compensated background with `n0 = p0 = 0`, or a calculated quenched Fe equilibrium;
 - a constant bimolecular recombination coefficient; and
 - no diffusion, field-dependent barriers or mobilities, trap kinetics, or tunneling.
@@ -62,10 +63,19 @@ K_R3 = [Fe3+] p0 / [Fe4+]
 K_R4 = n0 p0
 ```
 
-`K_R3` and `K_R4` use the temperature-dependent Denk expressions tabulated by Wang et al. (2016). This is a quenched
-background calculation, not an annealing calculation: the mode does not derive `c_v` from annealing temperature or
-oxygen partial pressure. During charge injection, the resolved background remains fixed and only excess electronic
-charge enters Poisson's equation. Local Fe charge states are not re-equilibrated with injected carriers.
+`K_R3` and `K_R4` use the temperature-dependent Denk expressions tabulated by Wang et al. (2016). The
+`quenched_equilibrium` mode uses the specified `c_v`. The `preparation_equilibrium` mode first solves the additional
+annealing relation
+
+```text
+K_R2 = n^2 c_v sqrt(p_O2)
+```
+
+together with the four equations above at the annealing temperature, then freezes the resulting `c_v` and solves the
+four-equation equilibrium again at the simulation temperature. `K_R2` is the Denk expression and oxygen partial
+pressure is converted from bar to Pa at the configuration boundary. During charge injection, the resolved background
+remains fixed and only excess electronic charge enters Poisson's equation. Local Fe charge states are not
+re-equilibrated with injected carriers.
 
 The compensation crossover occurs near `C_Fe = 2 c_v`. Below it, electrons compensate vacancy charge and the
 background is n-type; above it, holes and neutral Fe4+ increase and the background is p-type. At the benchmark operating

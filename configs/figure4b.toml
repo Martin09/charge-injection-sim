@@ -14,6 +14,10 @@ temperature_k = 483.15
 voltage_v = 40.0
 thickness_um = 500.0
 
+[preparation]
+annealing_temperature_k = 1173.15
+oxygen_partial_pressure_bar = 2.0e-5
+
 [background]
 model = "simplified"
 

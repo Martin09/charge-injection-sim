@@ -104,9 +104,19 @@ def _background_summary(resolved: ResolvedInputsSI) -> str:
         + material.hole_mobility_m2_per_v_s * background.hole_m3
     )
     conductivity_fraction = 100.0 * electronic_sigma / vacancy_sigma
+    if background.model is BackgroundModel.PREPARATION_EQUILIBRIUM:
+        preparation_summary = (
+            "Vacancies calculated from preparation (Denk constants)\n"
+            f"Annealing temperature: {resolved.preparation.annealing_temperature_k:.6g} K\n"
+            "Annealing oxygen partial pressure: "
+            f"{resolved.preparation.oxygen_partial_pressure_pa / 1e5:.6g} bar\n"
+            f"Frozen oxygen vacancies: {material.oxygen_vacancy_m3 / 1e6:.3e} cm^-3\n"
+        )
+    else:
+        preparation_summary = "Calculated quenched equilibrium (Denk constants)\n"
     return (
-        "Calculated quenched equilibrium (Denk constants)\n"
-        f"Fe compensation crossover, 2[V_O]: {compensation_threshold / 1e6:.3e} cm^-3\n"
+        preparation_summary
+        + f"Fe compensation crossover, 2[V_O]: {compensation_threshold / 1e6:.3e} cm^-3\n"
         f"Current Fe balance: {regime}\n"
         f"Charged Fe3+: {background.charged_fe3_m3 / 1e6:.3e} cm^-3 "
         f"({charged_fraction:.1f}% of total Fe)\n"
@@ -137,8 +147,8 @@ def create_page(config_path: str | Path = DEFAULT_CONFIG) -> None:
             "position runs from anode to cathode."
         ).classes("text-base text-gray-700")
         ui.label(
-            "Choose either the original simplified background or calculate equilibrium carriers "
-            "and Fe charge states for the specified, quenched vacancy density."
+            "Use the original simplified background, calculate equilibrium for a specified "
+            "vacancy density, or derive the frozen vacancy density from preparation conditions."
         ).classes("scientific-note text-sm text-gray-800")
 
         status_label = ui.label("No completed run").classes("font-medium text-gray-700")
@@ -150,12 +160,30 @@ def create_page(config_path: str | Path = DEFAULT_CONFIG) -> None:
                     options={
                         BackgroundModel.SIMPLIFIED.value: "Simplified background",
                         BackgroundModel.QUENCHED_EQUILIBRIUM.value: "Calculated equilibrium",
+                        BackgroundModel.PREPARATION_EQUILIBRIUM.value: (
+                            "Calculated from preparation"
+                        ),
                     },
                     value=initial.background.model.value,
                     label="Background defect chemistry",
                 ).classes("w-full")
+                vacancy_density = ui.number(
+                    "Oxygen-vacancy concentration (cm^-3)",
+                    value=initial.material.oxygen_vacancy_cm3,
+                    format="%.6g",
+                ).classes("w-full")
                 temperature = ui.number(
                     "Temperature (K)", value=initial.experiment.temperature_k, format="%.4g"
+                ).classes("w-full")
+                annealing_temperature = ui.number(
+                    "Annealing temperature (K)",
+                    value=initial.preparation.annealing_temperature_k,
+                    format="%.6g",
+                ).classes("w-full")
+                oxygen_partial_pressure = ui.number(
+                    "Annealing oxygen pressure (bar)",
+                    value=initial.preparation.oxygen_partial_pressure_bar,
+                    format="%.6g",
                 ).classes("w-full")
                 voltage = ui.number(
                     "Applied voltage (V)", value=initial.experiment.voltage_v, format="%.4g"
@@ -217,10 +245,12 @@ def create_page(config_path: str | Path = DEFAULT_CONFIG) -> None:
             material_inputs = [
                 _number(_label(key), value)
                 for key, value in initial.material.model_dump().items()
-                if key != "recombination_cm3_per_s"
+                if key not in ("oxygen_vacancy_cm3", "recombination_cm3_per_s")
             ]
             material_keys = [
-                key for key in initial.material.model_dump() if key != "recombination_cm3_per_s"
+                key
+                for key in initial.material.model_dump()
+                if key not in ("oxygen_vacancy_cm3", "recombination_cm3_per_s")
             ]
             solver_inputs = []
             for key, value in initial.solver.model_dump().items():
@@ -246,7 +276,12 @@ def create_page(config_path: str | Path = DEFAULT_CONFIG) -> None:
             voltage_v=voltage.value,
             thickness_um=thickness.value,
         )
+        data["preparation"].update(
+            annealing_temperature_k=annealing_temperature.value,
+            oxygen_partial_pressure_bar=oxygen_partial_pressure.value,
+        )
         data["background"]["model"] = background_model.value
+        data["material"]["oxygen_vacancy_cm3"] = vacancy_density.value
         data["material"]["recombination_cm3_per_s"] = recombination.value
         for key, material_input in zip(material_keys, material_inputs, strict=True):
             data["material"][key] = material_input.value
@@ -259,7 +294,10 @@ def create_page(config_path: str | Path = DEFAULT_CONFIG) -> None:
 
     ui_inputs = [
         background_model,
+        vacancy_density,
         temperature,
+        annealing_temperature,
+        oxygen_partial_pressure,
         voltage,
         thickness,
         recombination,
@@ -268,7 +306,14 @@ def create_page(config_path: str | Path = DEFAULT_CONFIG) -> None:
         *(element for _key, element, _is_int in solver_inputs),
     ]
 
+    def update_mode_visibility() -> None:
+        preparation_mode = background_model.value == BackgroundModel.PREPARATION_EQUILIBRIUM.value
+        vacancy_density.set_visibility(not preparation_mode)
+        annealing_temperature.set_visibility(preparation_mode)
+        oxygen_partial_pressure.set_visibility(preparation_mode)
+
     def mark_edited() -> None:
+        update_mode_visibility()
         try:
             preview = edited_snapshot().to_si()
         except ValidationError, ValueError:
@@ -283,6 +328,7 @@ def create_page(config_path: str | Path = DEFAULT_CONFIG) -> None:
 
     for field in ui_inputs:
         field.on_value_change(lambda _event: mark_edited())
+    update_mode_visibility()
 
     worker_process: Any = None
     progress_queue: Any = None
@@ -353,9 +399,13 @@ def create_page(config_path: str | Path = DEFAULT_CONFIG) -> None:
             ).classes("w-full")
         elapsed = sum(result.diagnostics.elapsed_seconds for result in results)
         mode_label = (
-            "calculated equilibrium"
-            if resolved.background.model is BackgroundModel.QUENCHED_EQUILIBRIUM
-            else "simplified background"
+            "calculated from preparation"
+            if resolved.background.model is BackgroundModel.PREPARATION_EQUILIBRIUM
+            else (
+                "calculated equilibrium"
+                if resolved.background.model is BackgroundModel.QUENCHED_EQUILIBRIUM
+                else "simplified background"
+            )
         )
         status_label.set_text(
             f"Last completed run passed using {mode_label} ({elapsed:.3f} s solver time)"

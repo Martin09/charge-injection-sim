@@ -48,6 +48,20 @@ def test_background_selector_defaults_to_simplified() -> None:
         )
 
         assert selector.value == BackgroundModel.SIMPLIFIED.value
+        vacancy = next(
+            element
+            for element in page.descendants()
+            if isinstance(element, ui.number)
+            and element.props["label"] == "Oxygen-vacancy concentration (cm^-3)"
+        )
+        annealing = next(
+            element
+            for element in page.descendants()
+            if isinstance(element, ui.number)
+            and element.props["label"] == "Annealing temperature (K)"
+        )
+        assert vacancy.visible
+        assert not annealing.visible
     page.delete()
 
 
@@ -75,4 +89,53 @@ def test_calculated_background_is_passed_to_worker(monkeypatch: pytest.MonkeyPat
 
         assert captured[0].background.model is BackgroundModel.QUENCHED_EQUILIBRIUM
         assert captured[0].background.hole_m3 > 0
+    page.delete()
+
+
+def test_preparation_background_is_passed_to_worker(monkeypatch: pytest.MonkeyPatch) -> None:
+    callbacks: dict[str, Callable] = {}
+    captured: list[ResolvedInputsSI] = []
+    monkeypatch.setattr(
+        ui.button, "on_click", lambda button, callback: callbacks.update({button.text: callback})
+    )
+    monkeypatch.setattr(
+        "charge_injection_sim.app.start_solver_worker",
+        lambda resolved: (captured.append(resolved) or None, None),
+    )
+
+    with ui.column() as page:
+        create_page()
+        selector = next(
+            element
+            for element in page.descendants()
+            if isinstance(element, ui.select)
+            and element.props["label"] == "Background defect chemistry"
+        )
+        selector.value = BackgroundModel.PREPARATION_EQUILIBRIUM.value
+
+        vacancy = next(
+            element
+            for element in page.descendants()
+            if isinstance(element, ui.number)
+            and element.props["label"] == "Oxygen-vacancy concentration (cm^-3)"
+        )
+        annealing = next(
+            element
+            for element in page.descendants()
+            if isinstance(element, ui.number)
+            and element.props["label"] == "Annealing temperature (K)"
+        )
+        pressure = next(
+            element
+            for element in page.descendants()
+            if isinstance(element, ui.number)
+            and element.props["label"] == "Annealing oxygen pressure (bar)"
+        )
+        assert not vacancy.visible
+        assert annealing.visible
+        assert pressure.visible
+        callbacks["Run"]()
+
+        assert captured[0].background.model is BackgroundModel.PREPARATION_EQUILIBRIUM
+        assert captured[0].material.oxygen_vacancy_m3 == pytest.approx(2.4249693e24)
     page.delete()

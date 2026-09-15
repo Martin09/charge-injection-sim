@@ -109,22 +109,29 @@ The initial benchmark described in the paper uses:
 | Hole mobility | 0.41 cm^2 V^-1 s^-1 |
 | Oxygen-vacancy mobility | 2.20 x 10^-8 cm^2 V^-1 s^-1 |
 | Recombination-rate constant | 1.0 x 10^-8 cm^3 s^-1 |
+| Annealing temperature | 900 degC (1173.15 K) |
+| Annealing oxygen partial pressure | 2.0 x 10^-5 bar |
 
 All values are converted to SI units before calculation. Literature values and numerical settings remain
 distinguishable in code and generated metadata; the benchmark uses no fitted values.
 
 Substituting total Fe for charged acceptors in Equation (2) implies a large hole background incompatible with the
-stated vacancy-dominated conductivity. The simulator therefore offers two explicit background models:
+stated vacancy-dominated conductivity. The simulator therefore offers three explicit background models:
 
 - `simplified` (default) neglects equilibrium electrons and holes and uses fixed compensation equal to twice the
   specified vacancy density;
 - `quenched_equilibrium` treats the specified vacancy density as frozen and solves Fe3+/Fe4+ ionization, intrinsic
   electron-hole equilibrium, Fe conservation, and charge neutrality at the simulation temperature using the Denk
-  constants reported by Wang et al. (2016) in [`defectivity_paper.pdf`](defectivity_paper.pdf).
+  constants reported by Wang et al. (2016) in [`defectivity_paper.pdf`](defectivity_paper.pdf); and
+- `preparation_equilibrium` first calculates the vacancy density at the specified annealing temperature and oxygen
+  partial pressure using the Denk oxygen-exchange equilibrium, freezes that inventory, and then performs the same
+  quenched equilibrium calculation at the simulation temperature. In this mode, `oxygen_vacancy_cm3` is not used.
 
-For the benchmark, the calculated mode gives approximately 87.1% charged Fe3+, `p0 = 1.48 x 10^10 cm^-3`, and
-`n0 = 21 cm^-3`. Its equilibrium electronic conductivity is about 5.7% of the vacancy conductivity. The web app shows
-these resolved values before a run. This mode calculates the equilibrium background only; it does not evolve vacancies
+For the benchmark preparation conditions, the new mode calculates `2.425 x 10^18 cm^-3` oxygen vacancies, consistent
+with the paper's separately tabulated `2.43 x 10^18 cm^-3`. After quenching, the calculated modes give approximately
+87.1% charged Fe3+, `p0 = 1.48 x 10^10 cm^-3`, and
+`n0 = 21 cm^-3`. Their equilibrium electronic conductivity is about 5.7% of the vacancy conductivity. The web app shows
+these resolved values before a run. These modes calculate the equilibrium background only; they do not evolve vacancies
 or continuously re-equilibrate Fe in response to injected charge.
 
 As an independently calculated check, the tabulated vacancy concentration and mobility give

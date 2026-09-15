@@ -15,7 +15,7 @@ from matplotlib.figure import Figure
 from charge_injection_sim.config import InputConfig, ResolvedInputsSI
 from charge_injection_sim.solver import SimulationResult
 
-MODEL_VERSION = "figure4b-drift-bvp-v2-background-models"
+MODEL_VERSION = "figure4b-drift-bvp-v3-preparation-equilibrium"
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 CSV_COLUMNS = (
     "position_m",

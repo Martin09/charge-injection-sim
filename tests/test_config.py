@@ -5,6 +5,11 @@ from pydantic import ValidationError
 from scipy.constants import electron_mass, elementary_charge
 
 from charge_injection_sim.config import BackgroundModel, InputConfig, load_config, load_inputs
+from charge_injection_sim.defect_chemistry import (
+    annealed_fe_equilibrium,
+    denk_equilibrium_constants_si,
+    denk_oxygen_exchange_constant_si,
+)
 
 BENCHMARK_PATH = Path(__file__).parents[1] / "configs" / "figure4b.toml"
 
@@ -63,6 +68,64 @@ def test_quenched_equilibrium_background_matches_benchmark_defect_chemistry() ->
     assert abs(charge_residual) / resolved.material.reported_total_fe_m3 < 1e-12
 
 
+def test_preparation_equilibrium_calculates_and_quenches_vacancy_inventory() -> None:
+    data = load_config(BENCHMARK_PATH).model_dump()
+    data["background"]["model"] = "preparation_equilibrium"
+    data["material"]["oxygen_vacancy_cm3"] = 1.0
+
+    resolved = InputConfig.model_validate(data).to_si()
+    background = resolved.background
+
+    assert resolved.preparation.oxygen_partial_pressure_pa == pytest.approx(2.0)
+    assert resolved.material.oxygen_vacancy_m3 == pytest.approx(2.4249693e24, rel=1e-7)
+    assert background.charged_fe3_m3 is not None
+    charge_residual = (
+        2.0 * resolved.material.oxygen_vacancy_m3
+        + background.hole_m3
+        - background.charged_fe3_m3
+        - background.electron_m3
+    )
+    assert abs(charge_residual) / resolved.material.reported_total_fe_m3 < 1e-12
+    assert "annealing temperature" in " ".join(resolved.model_assumptions)
+
+
+def test_annealed_equilibrium_satisfies_mass_action_and_charge_balance() -> None:
+    temperature_k = 1173.15
+    pressure_pa = 2.0
+    total_fe_m3 = 5.58e24
+
+    equilibrium = annealed_fe_equilibrium(temperature_k, pressure_pa, total_fe_m3)
+    kr2 = denk_oxygen_exchange_constant_si(temperature_k)
+    kr3, kr4 = denk_equilibrium_constants_si(temperature_k)
+
+    assert (
+        equilibrium.electron_m3** 2 * equilibrium.oxygen_vacancy_m3 * pressure_pa** 0.5
+        == pytest.approx(kr2, rel=2e-14)
+    )
+    assert (
+        equilibrium.charged_fe3_m3 * equilibrium.hole_m3 / equilibrium.neutral_fe4_m3
+        == pytest.approx(kr3, rel=2e-14)
+    )
+    assert equilibrium.electron_m3 * equilibrium.hole_m3 == pytest.approx(kr4, rel=2e-14)
+    charge_residual = (
+        2.0 * equilibrium.oxygen_vacancy_m3
+        + equilibrium.hole_m3
+        - equilibrium.charged_fe3_m3
+        - equilibrium.electron_m3
+    )
+    assert abs(charge_residual) / total_fe_m3 < 1e-12
+
+
+def test_higher_annealing_oxygen_pressure_reduces_vacancy_concentration() -> None:
+    data = load_config(BENCHMARK_PATH).model_dump()
+    data["background"]["model"] = "preparation_equilibrium"
+    low_pressure = InputConfig.model_validate(data).to_si()
+    data["preparation"]["oxygen_partial_pressure_bar"] = 2.0e-3
+    high_pressure = InputConfig.model_validate(data).to_si()
+
+    assert high_pressure.material.oxygen_vacancy_m3 < low_pressure.material.oxygen_vacancy_m3
+
+
 def test_quenched_equilibrium_preserves_small_fe4_population() -> None:
     data = load_config(BENCHMARK_PATH).model_dump()
     data["background"]["model"] = "quenched_equilibrium"
@@ -114,6 +177,8 @@ def test_load_inputs_rejects_unknown_file_type(tmp_path: Path) -> None:
         ("experiment", "temperature_k", 0),
         ("experiment", "voltage_v", -40),
         ("experiment", "thickness_um", float("inf")),
+        ("preparation", "annealing_temperature_k", 0),
+        ("preparation", "oxygen_partial_pressure_bar", -1),
         ("solver", "residual_tolerance", 1),
         ("solver", "initial_nodes", 1),
     ],

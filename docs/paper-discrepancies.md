@@ -7,8 +7,9 @@ model or software. The most important differences and uncertainties are summariz
 
 The paper's general equations include equilibrium electron and hole concentrations, `n0` and `p0`, connected to
 charged acceptors such as Fe through charge neutrality. The default simulation sets `n0 = p0 = 0` and assumes a fixed
-negative background charge that compensates the oxygen vacancies. An optional `quenched_equilibrium` mode now uses the
-specified vacancy density and the 2016 paper's Denk constants to calculate Fe3+, Fe4+, `n0`, and `p0`.
+negative background charge that compensates the oxygen vacancies. Optional calculated modes use the 2016 paper's Denk
+constants to calculate Fe3+, Fe4+, `n0`, and `p0`, with the vacancy density either specified or derived from preparation
+conditions.
 
 In simplified mode, reported total Fe is saved as provenance but does not affect the graph. In calculated mode, it is
 the conserved total `Fe3+ + Fe4+`; it is never substituted directly as charged Fe. For the benchmark the calculation
@@ -16,8 +17,9 @@ gives approximately `4.86e18 cm^-3` Fe3+, which nearly compensates `2 c_v`, whil
 
 ## Other differences and uncertainties
 
-- **Vacancy concentration:** Both modes accept the reported concentration directly. Calculated mode re-establishes
-  electronic and Fe equilibrium at the run temperature but does not calculate vacancies from annealing conditions.
+- **Vacancy concentration:** `simplified` and `quenched_equilibrium` accept the reported concentration directly.
+  `preparation_equilibrium` calculates it from annealing temperature and oxygen partial pressure using the Denk R2
+  equilibrium before applying the quench assumption.
 - **Numerical method:** The paper reduces the equations to an equation for electric field versus electron concentration
   and mentions a Runge-Kutta solver. This project instead solves a spatial boundary-value problem with SciPy. It is
   intended to represent the same transport equations under the prototype assumptions, but the authors' exact algorithm

@@ -17,6 +17,13 @@ class EquilibriumBackground:
     neutral_fe4_m3: float
 
 
+@dataclass(frozen=True)
+class AnnealedEquilibrium(EquilibriumBackground):
+    """Full annealing equilibrium, including the oxygen-vacancy inventory."""
+
+    oxygen_vacancy_m3: float
+
+
 def denk_equilibrium_constants_si(temperature_k: float) -> tuple[float, float]:
     """Return Denk et al. constants for Fe ionization and electron-hole generation.
 
@@ -31,6 +38,73 @@ def denk_equilibrium_constants_si(temperature_k: float) -> tuple[float, float]:
         -(3.3 - 6.0e-4 * temperature_k) / (boltzmann_ev_per_k * temperature_k)
     )
     return float(kr3_cm3 * 1e6), float(kr4_cm6 * 1e12)
+
+
+def denk_oxygen_exchange_constant_si(temperature_k: float) -> float:
+    """Return the Denk R2 constant in m^-9 Pa^1/2.
+
+    Wang et al. (2016), Table 1, tabulates ``K_R2 = n^2 [V_O] sqrt(pO2)``
+    in cm^-9 bar^1/2. Pressure and concentration are converted here so the
+    equilibrium solver operates entirely in SI units.
+    """
+    if temperature_k <= 0:
+        raise ValueError("temperature must be positive")
+    boltzmann_ev_per_k = Boltzmann / elementary_charge
+    kr2_cm9_bar_half = 1.82e60 * np.exp(
+        -(4.97 - 1.2e-3 * temperature_k) / (boltzmann_ev_per_k * temperature_k)
+    )
+    return float(kr2_cm9_bar_half * 1e18 * np.sqrt(1e5))
+
+
+def annealed_fe_equilibrium(
+    temperature_k: float,
+    oxygen_partial_pressure_pa: float,
+    total_fe_m3: float,
+) -> AnnealedEquilibrium:
+    """Solve the Denk annealing equilibrium including oxygen exchange.
+
+    Doubly ionized oxygen vacancies, Fe3+/Fe4+, electrons, and holes satisfy
+    reactions R2-R4, Fe conservation, and charge neutrality.
+    """
+    if temperature_k <= 0 or oxygen_partial_pressure_pa <= 0 or total_fe_m3 <= 0:
+        raise ValueError("temperature, oxygen partial pressure, and total Fe must be positive")
+
+    kr2 = denk_oxygen_exchange_constant_si(temperature_k)
+    kr3, kr4 = denk_equilibrium_constants_si(temperature_k)
+    constants = np.array([kr2, kr3, kr4])
+    if not np.all(np.isfinite(constants)) or np.any(constants <= 0):
+        raise ValueError("Denk equilibrium constants are not finite and positive")
+
+    log_kr2 = np.log(kr2)
+    log_kr3 = np.log(kr3)
+    log_kr4 = np.log(kr4)
+    log_total_fe = np.log(total_fe_m3)
+    log_pressure = np.log(oxygen_partial_pressure_pa)
+
+    def log_charge_balance(log_hole: float) -> float:
+        log_electron = log_kr4 - log_hole
+        log_vacancy = log_kr2 - 2.0 * log_electron - 0.5 * log_pressure
+        log_charged_fe3 = log_total_fe + log_kr3 - np.logaddexp(log_hole, log_kr3)
+        positive_charge = np.logaddexp(np.log(2.0) + log_vacancy, log_hole)
+        negative_charge = np.logaddexp(log_charged_fe3, log_electron)
+        return float(positive_charge - negative_charge)
+
+    log_hole = brentq(log_charge_balance, -700.0, 700.0, xtol=1e-12, rtol=1e-14)
+    hole = float(np.exp(log_hole))
+    electron = float(kr4 / hole)
+    oxygen_vacancy = float(kr2 / (electron**2 * np.sqrt(oxygen_partial_pressure_pa)))
+    charged_fe3 = float(total_fe_m3 * kr3 / (hole + kr3))
+    neutral_fe4 = float(total_fe_m3 * hole / (hole + kr3))
+    values = np.array([electron, hole, charged_fe3, neutral_fe4, oxygen_vacancy])
+    if not np.all(np.isfinite(values)) or np.any(values <= 0):
+        raise ValueError("annealed defect equilibrium produced invalid concentrations")
+    return AnnealedEquilibrium(
+        electron,
+        hole,
+        charged_fe3,
+        neutral_fe4,
+        oxygen_vacancy,
+    )
 
 
 def quenched_fe_equilibrium(
