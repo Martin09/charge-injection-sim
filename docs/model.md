@@ -67,6 +67,11 @@ background calculation, not an annealing calculation: the mode does not derive `
 oxygen partial pressure. During charge injection, the resolved background remains fixed and only excess electronic
 charge enters Poisson's equation. Local Fe charge states are not re-equilibrated with injected carriers.
 
+The compensation crossover occurs near `C_Fe = 2 c_v`. Below it, electrons compensate vacancy charge and the
+background is n-type; above it, holes and neutral Fe4+ increase and the background is p-type. At the benchmark operating
+temperature the intrinsic carrier product is very small, so this crossover is physically sharp and `n0` and `p0` can
+change by many orders of magnitude for small concentration changes near `2 c_v`.
+
 ## Spatial boundary-value formulation
 
 Let `epsilon = epsilon_0 epsilon_r`, vacancy conductivity `s_v = 2 q mu_v c_v`, and recombination

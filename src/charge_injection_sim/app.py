@@ -85,6 +85,14 @@ def _background_summary(resolved: ResolvedInputsSI) -> str:
     material = resolved.material
     assert background.charged_fe3_m3 is not None and background.neutral_fe4_m3 is not None
     charged_fraction = 100.0 * background.charged_fe3_m3 / material.reported_total_fe_m3
+    compensation_threshold = 2.0 * material.oxygen_vacancy_m3
+    relative_balance = material.reported_total_fe_m3 / compensation_threshold - 1.0
+    if abs(relative_balance) < 1e-12:
+        regime = "at the sharp n-type/p-type compensation crossover"
+    elif relative_balance < 0:
+        regime = f"{abs(relative_balance):.1%} below crossover (electron-rich, n-type)"
+    else:
+        regime = f"{relative_balance:.1%} above crossover (hole-rich, p-type)"
     vacancy_sigma = (
         2.0
         * elementary_charge
@@ -98,6 +106,8 @@ def _background_summary(resolved: ResolvedInputsSI) -> str:
     conductivity_fraction = 100.0 * electronic_sigma / vacancy_sigma
     return (
         "Calculated quenched equilibrium (Denk constants)\n"
+        f"Fe compensation crossover, 2[V_O]: {compensation_threshold / 1e6:.3e} cm^-3\n"
+        f"Current Fe balance: {regime}\n"
         f"Charged Fe3+: {background.charged_fe3_m3 / 1e6:.3e} cm^-3 "
         f"({charged_fraction:.1f}% of total Fe)\n"
         f"Neutral Fe4+: {background.neutral_fe4_m3 / 1e6:.3e} cm^-3\n"

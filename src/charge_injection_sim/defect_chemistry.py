@@ -65,7 +65,9 @@ def quenched_fe_equilibrium(
     hole = float(np.exp(log_hole))
     electron = float(kr4 / hole)
     charged_fe3 = float(total_fe_m3 * kr3 / (hole + kr3))
-    neutral_fe4 = float(total_fe_m3 - charged_fe3)
+    # Evaluate both fractions directly: subtracting Fe3+ from total Fe loses
+    # the very small but physically meaningful Fe4+ population in n-type cases.
+    neutral_fe4 = float(total_fe_m3 * hole / (hole + kr3))
     values = np.array([electron, hole, charged_fe3, neutral_fe4])
     if not np.all(np.isfinite(values)) or np.any(values < 0):
         raise ValueError("quenched defect equilibrium produced invalid concentrations")

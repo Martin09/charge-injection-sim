@@ -63,6 +63,23 @@ def test_quenched_equilibrium_background_matches_benchmark_defect_chemistry() ->
     assert abs(charge_residual) / resolved.material.reported_total_fe_m3 < 1e-12
 
 
+def test_quenched_equilibrium_preserves_small_fe4_population() -> None:
+    data = load_config(BENCHMARK_PATH).model_dump()
+    data["background"]["model"] = "quenched_equilibrium"
+    data["material"]["reported_total_fe_cm3"] = 1e18
+
+    resolved = InputConfig.model_validate(data).to_si()
+    background = resolved.background
+
+    assert background.charged_fe3_m3 is not None
+    assert background.neutral_fe4_m3 is not None
+    assert background.neutral_fe4_m3 > 0
+    assert background.charged_fe3_m3 + background.neutral_fe4_m3 == pytest.approx(
+        resolved.material.reported_total_fe_m3, rel=1e-14
+    )
+    assert background.electron_m3 > background.hole_m3
+
+
 def test_unknown_background_model_is_rejected() -> None:
     data = load_config(BENCHMARK_PATH).model_dump()
     data["background"]["model"] = "fully_ionized_fe"
