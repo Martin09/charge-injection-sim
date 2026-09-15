@@ -170,3 +170,13 @@ def load_config(path: str | Path) -> InputConfig:
     with config_path.open("rb") as config_file:
         data = tomllib.load(config_file)
     return InputConfig.model_validate(data)
+
+
+def load_inputs(path: str | Path) -> InputConfig:
+    """Load validated literature-facing inputs from TOML or a saved JSON snapshot."""
+    input_path = Path(path)
+    if input_path.suffix.lower() == ".toml":
+        return load_config(input_path)
+    if input_path.suffix.lower() == ".json":
+        return InputConfig.model_validate_json(input_path.read_text(encoding="utf-8"))
+    raise ValueError(f"unsupported input format {input_path.suffix!r}; expected .toml or .json")

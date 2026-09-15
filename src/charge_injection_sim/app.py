@@ -1,0 +1,293 @@
+"""Minimal local NiceGUI application for interactive benchmark runs."""
+
+from dataclasses import dataclass
+from datetime import UTC, datetime
+from pathlib import Path
+from typing import Any
+
+import plotly.graph_objects as go
+from nicegui import run, ui
+from pydantic import ValidationError
+
+from charge_injection_sim.config import (
+    MODEL_ASSUMPTIONS,
+    InputConfig,
+    ResolvedInputsSI,
+    load_config,
+)
+from charge_injection_sim.output import save_run
+from charge_injection_sim.solver import SimulationResult, SolverError, solve_all_cases
+
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+DEFAULT_CONFIG = PROJECT_ROOT / "configs" / "figure4b.toml"
+DEFAULT_OUTPUT_ROOT = PROJECT_ROOT / "outputs"
+
+
+@dataclass(frozen=True)
+class _CompletedRun:
+    inputs: InputConfig
+    resolved: ResolvedInputsSI
+    results: tuple[SimulationResult, ...]
+
+
+def _figure(results: tuple[SimulationResult, ...]) -> go.Figure:
+    colors = ("black", "red", "blue")
+    figure = go.Figure()
+    for index, result in enumerate(results):
+        figure.add_scatter(
+            x=result.position_m * 100.0,
+            y=result.total_conductivity_s_per_m * 0.01,
+            mode="lines",
+            name=result.case_name,
+            line={"color": colors[index] if index < len(colors) else None, "width": 2.5},
+        )
+    figure.update_layout(
+        margin={"l": 70, "r": 25, "t": 30, "b": 60},
+        xaxis_title="Position, anode to cathode (cm)",
+        yaxis_title="Total conductivity (S/cm)",
+        yaxis_type="log",
+        hovermode="x unified",
+        template="plotly_white",
+        legend={"orientation": "h", "y": 1.04},
+    )
+    return figure
+
+
+def _validation_message(error: ValidationError) -> str:
+    lines = []
+    for item in error.errors(include_url=False):
+        location = ".".join(str(part) for part in item["loc"])
+        lines.append(f"{location}: {item['msg']}")
+    return "\n".join(lines)
+
+
+def create_page(config_path: str | Path = DEFAULT_CONFIG) -> None:
+    """Create the single-page UI from a validated startup configuration."""
+    initial = load_config(config_path)
+    completed: _CompletedRun | None = None
+    in_flight = False
+
+    ui.add_css("""
+        body { background: #f4f1e8; color: #17211b; }
+        .q-card { border: 1px solid #d7d0c2; box-shadow: none; }
+        .scientific-note { border-left: 4px solid #a33b20; padding-left: 1rem; }
+    """)
+    with ui.column().classes("w-full max-w-7xl mx-auto p-4 md:p-8 gap-5"):
+        ui.label("Charge Injection Conductivity").classes(
+            "text-3xl md:text-4xl font-bold tracking-tight"
+        )
+        ui.label(
+            "Approximate 1D Fe-doped SrTiO3 prototype. SI units are used internally; "
+            "position runs from anode to cathode."
+        ).classes("text-base text-gray-700")
+        ui.label(
+            "Background approximation: equilibrium electrons and holes are neglected "
+            "(n0 = p0 = 0), with fixed compensating charge for the prescribed vacancy density."
+        ).classes("scientific-note text-sm text-gray-800")
+
+        status_label = ui.label("No completed run").classes("font-medium text-gray-700")
+
+        with ui.row().classes("w-full items-start gap-5"):
+            with ui.card().classes("w-full lg:w-80 p-5 gap-3"):
+                ui.label("Run parameters").classes("text-xl font-bold")
+                temperature = ui.number(
+                    "Temperature (K)", value=initial.experiment.temperature_k, format="%.4g"
+                ).classes("w-full")
+                voltage = ui.number(
+                    "Applied voltage (V)", value=initial.experiment.voltage_v, format="%.4g"
+                ).classes("w-full")
+                thickness = ui.number(
+                    "Thickness (um)", value=initial.experiment.thickness_um, format="%.4g"
+                ).classes("w-full")
+                recombination = ui.number(
+                    "Recombination (cm^3/s)",
+                    value=initial.material.recombination_cm3_per_s,
+                    format="%.4g",
+                ).classes("w-full")
+                barrier_inputs = [
+                    ui.number(
+                        f"{case.name} paired barrier (eV)",
+                        value=case.electron_barrier_ev,
+                        format="%.4g",
+                    ).classes("w-full")
+                    for case in initial.cases
+                ]
+
+                with ui.row().classes("items-center gap-3"):
+                    run_button = ui.button("Run", icon="play_arrow")
+                    save_button = ui.button("Save", icon="save").props("outline")
+                    save_button.disable()
+                    busy = ui.spinner(size="lg")
+                    busy.set_visibility(False)
+                error_label = ui.label().classes("whitespace-pre-wrap text-red-800")
+
+            with ui.column().classes("grow min-w-0 gap-5"):
+                chart = ui.plotly(_figure(())).classes("w-full h-[32rem]")
+                diagnostics_card = ui.card().classes("w-full p-5")
+                with diagnostics_card:
+                    ui.label("Diagnostics will appear after a successful run.")
+
+        with ui.expansion("Fixed material and numerical parameters", icon="science").classes(
+            "w-full bg-white"
+        ):
+            material_rows = [
+                {"parameter": key, "value": f"{value:g}"}
+                for key, value in initial.material.model_dump().items()
+                if key != "recombination_cm3_per_s"
+            ]
+            solver_rows = [
+                {"parameter": key, "value": f"{value:g}"}
+                for key, value in initial.solver.model_dump().items()
+            ]
+            ui.table(
+                columns=[
+                    {
+                        "name": "parameter",
+                        "label": "Material parameter (units in name)",
+                        "field": "parameter",
+                    },
+                    {"name": "value", "label": "Value", "field": "value"},
+                ],
+                rows=material_rows,
+                row_key="parameter",
+            ).classes("w-full")
+            ui.table(
+                columns=[
+                    {"name": "parameter", "label": "Solver setting", "field": "parameter"},
+                    {"name": "value", "label": "Value", "field": "value"},
+                ],
+                rows=solver_rows,
+                row_key="parameter",
+            ).classes("w-full")
+
+        with ui.expansion("Model assumptions", icon="info").classes(
+            "w-full bg-white scientific-note"
+        ):
+            for assumption in MODEL_ASSUMPTIONS:
+                ui.label(f"- {assumption}")
+
+    def edited_snapshot() -> InputConfig:
+        data: dict[str, Any] = initial.model_dump()
+        data["experiment"].update(
+            temperature_k=temperature.value,
+            voltage_v=voltage.value,
+            thickness_um=thickness.value,
+        )
+        data["material"]["recombination_cm3_per_s"] = recombination.value
+        for case, barrier_input in zip(data["cases"], barrier_inputs, strict=True):
+            case["electron_barrier_ev"] = barrier_input.value
+            case["hole_barrier_ev"] = barrier_input.value
+        return InputConfig.model_validate(data)
+
+    def mark_edited() -> None:
+        if completed is not None:
+            status_label.set_text("Inputs changed; plot shows the last completed run")
+
+    for field in [temperature, voltage, thickness, recombination, *barrier_inputs]:
+        field.on_value_change(lambda _event: mark_edited())
+
+    async def execute_run() -> None:
+        nonlocal completed, in_flight
+        if in_flight:
+            return
+        try:
+            snapshot = edited_snapshot()
+        except ValidationError as error:
+            error_label.set_text(_validation_message(error))
+            return
+
+        in_flight = True
+        run_button.disable()
+        for field in [temperature, voltage, thickness, recombination, *barrier_inputs]:
+            field.disable()
+        busy.set_visibility(True)
+        error_label.set_text("")
+        status_label.set_text("Solving three cases...")
+        try:
+            resolved = snapshot.to_si()
+            results = await run.cpu_bound(solve_all_cases, resolved)
+            if results is None:
+                raise SolverError("background calculation returned no result")
+        # NiceGUI must present worker and numerical failures to the user.
+        except Exception as error:
+            error_label.set_text(f"Run failed: {error}")
+            status_label.set_text("Last run failed; no new figure was accepted")
+        else:
+            completed = _CompletedRun(snapshot, resolved, results)
+            chart.update_figure(_figure(results))
+            diagnostics_card.clear()
+            with diagnostics_card:
+                ui.label("Accepted diagnostics").classes("text-xl font-bold")
+                rows = []
+                for result in results:
+                    diagnostics = result.diagnostics
+                    maximum_error = max(
+                        diagnostics.maximum_boundary_residual,
+                        diagnostics.voltage_relative_error,
+                        diagnostics.poisson_scaled_residual,
+                        diagnostics.continuity_scaled_residual,
+                    )
+                    rows.append(
+                        {
+                            "case": result.case_name,
+                            "elapsed_s": f"{diagnostics.elapsed_seconds:.3f}",
+                            "nodes": diagnostics.node_count,
+                            "current": f"{diagnostics.current_density_a_per_m2:.6g}",
+                            "max_residual": f"{maximum_error:.3g}",
+                        }
+                    )
+                ui.table(
+                    columns=[
+                        {"name": "case", "label": "Case", "field": "case"},
+                        {"name": "elapsed_s", "label": "Elapsed (s)", "field": "elapsed_s"},
+                        {"name": "nodes", "label": "Nodes", "field": "nodes"},
+                        {"name": "current", "label": "Current (A/m^2)", "field": "current"},
+                        {
+                            "name": "max_residual",
+                            "label": "Max scaled error",
+                            "field": "max_residual",
+                        },
+                    ],
+                    rows=rows,
+                    row_key="case",
+                ).classes("w-full")
+            elapsed = sum(result.diagnostics.elapsed_seconds for result in results)
+            status_label.set_text(f"Last completed run passed ({elapsed:.3f} s solver time)")
+            save_button.enable()
+        finally:
+            in_flight = False
+            busy.set_visibility(False)
+            run_button.enable()
+            for field in [temperature, voltage, thickness, recombination, *barrier_inputs]:
+                field.enable()
+
+    def save_completed_run() -> None:
+        if completed is None:
+            return
+        timestamp = datetime.now(UTC).strftime("figure4b-%Y%m%dT%H%M%S-%fZ")
+        try:
+            path = save_run(
+                DEFAULT_OUTPUT_ROOT / timestamp,
+                completed.inputs,
+                completed.resolved,
+                completed.results,
+            )
+        except Exception as error:
+            ui.notify(f"Save failed: {error}", type="negative", timeout=0)
+        else:
+            ui.notify(f"Saved to {path}", type="positive", timeout=8000)
+
+    run_button.on_click(execute_run)
+    save_button.on_click(save_completed_run)
+
+
+def run_app(config_path: str | Path = DEFAULT_CONFIG) -> None:
+    """Build and serve the app on loopback only."""
+    create_page(config_path)
+    ui.run(
+        host="127.0.0.1",
+        port=8080,
+        title="Charge Injection Simulation",
+        show=False,
+        reload=False,
+    )

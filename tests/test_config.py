@@ -4,7 +4,7 @@ import pytest
 from pydantic import ValidationError
 from scipy.constants import electron_mass, elementary_charge
 
-from charge_injection_sim.config import InputConfig, load_config
+from charge_injection_sim.config import InputConfig, load_config, load_inputs
 
 BENCHMARK_PATH = Path(__file__).parents[1] / "configs" / "figure4b.toml"
 
@@ -39,6 +39,13 @@ def test_resolved_inputs_serialize_to_json() -> None:
 
     assert restored == resolved
     assert restored.model_assumptions
+
+
+def test_load_inputs_rejects_unknown_file_type(tmp_path: Path) -> None:
+    path = tmp_path / "inputs.yaml"
+
+    with pytest.raises(ValueError, match=r"expected \.toml or \.json"):
+        load_inputs(path)
 
 
 @pytest.mark.parametrize(

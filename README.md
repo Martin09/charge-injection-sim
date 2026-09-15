@@ -5,31 +5,60 @@ of a dielectric material. The first target is the bipolar charge-injection resul
 where conductivity is plotted through a 500 um Fe-doped SrTiO3 crystal for several equal electron and hole Schottky
 barrier heights.
 
-The repository now contains the Stage 1 validated input contract and the Stage 2 numerical solver. All three benchmark
-cases converge with physical-domain, equation-residual, voltage, current, and refinement checks. It does not yet contain
-the web interface, exports, or a reproduced figure.
+The repository contains the Stage 1 validated input contract, Stage 2 numerical solver, and Stage 3 local web and
+reproducible-output workflow. All three benchmark cases converge with physical-domain, equation-residual, voltage,
+current, and refinement checks. The scientific comparison and reproduction assessment remain Stage 4 work.
 
 **First milestone:** an explicitly approximate, scientifically checked reproduction of Figure 4(b), driven by a
 TOML configuration file validated with Pydantic v2 and explored through a local web interface on WSL/Linux.
 The MVP uses one NiceGUI + Plotly page: edit parameters, click Run, inspect the three curves, and save the result.
-A thin script will support repeatable runs. The author's code/data are unavailable; exact reproduction is not
-a prerequisite for this milestone. The configuration schema, SI conversion, and simulator are implemented; the web
-interface, exports, and run script remain planned.
+A thin script supports repeatable runs. The author's code/data are unavailable; exact reproduction is not a
+prerequisite for this milestone.
 
 See the [critical review](docs/review.md) for the evidence and unresolved assumptions, and the
 [staged implementation plan](docs/implementation-plan.md) for architecture, delivery gates, and validation.
 The [prototype model contract](docs/model.md) records the equations, coordinate convention, scaling plan, assumptions,
 and singular cases that constrain the solver implementation.
 
-## Planned Interactive Workflow
+## Interactive Workflow
 
-Load the benchmark TOML at startup, edit a few unit-labeled parameters, and click Run. Validate the inputs,
-show a busy indicator during the single background calculation, then display the three conductivity curves and
-basic numerical diagnostics. Save the actual run inputs as JSON, raw CSV data, diagnostics, and a basic PNG;
-the reproduction script can reload those inputs. The page and script use the same solver and Pydantic schema.
+Start the loopback-only web page from the repository root:
+
+```bash
+uv run python scripts/web.py
+```
+
+Open `http://127.0.0.1:8080` in a browser. Under WSL 2, the Windows browser normally reaches this loopback address
+directly. The page loads `configs/figure4b.toml`, exposes temperature, voltage, thickness, recombination, and the three
+paired barrier heights, and shows the remaining material and solver values read-only. Run performs full Pydantic
+validation and uses NiceGUI's CPU-bound worker so the page remains responsive. A failed solve does not replace the last
+accepted plot. Save writes the validated snapshot and exact adaptive-mesh result arrays under `outputs/`.
 
 The first version prioritizes a working scientific loop. Auto-preview, caching, cancellation, pinned comparisons,
 browser file editing, and publication polish are deferred until the MVP demonstrates what is useful.
+
+## Reproducible Output
+
+Run and export the benchmark without the web page:
+
+```bash
+uv run python scripts/reproduce_figure4b.py --config configs/figure4b.toml
+```
+
+The command prints the new output directory. Pass `--output outputs/my-run` to select it; an existing directory is
+never overwritten. Relative config and output paths resolve from the current working directory. Every run contains:
+
+- `inputs.json`: validated literature-facing inputs suitable for replay;
+- `resolved_inputs_si.json`: the exact immutable SI solver snapshot;
+- one CSV per case containing exact adaptive-mesh values with units in column names;
+- `metadata.json`: diagnostics, assumptions, solver settings, package/model versions, and available Git provenance;
+- `conductivity.png`: a basic static plot in Figure 4(b)'s cm and S/cm display units.
+
+Replay any saved input snapshot with:
+
+```bash
+uv run python scripts/reproduce_figure4b.py --config outputs/<run>/inputs.json
+```
 
 ## Reference
 
@@ -124,7 +153,7 @@ as a complete initial-value problem.
 ## Project Layout
 
 ```text
-src/charge_injection_sim/  validated inputs, SI conversion, physics, and BVP solver
+src/charge_injection_sim/  validated inputs, solver, local app, plotting, and serialization
 configs/                   validated TOML benchmark inputs
 docs/                      review and staged implementation plan
 scripts/                   thin reproducible simulation/plot entry points
@@ -154,7 +183,8 @@ uv run prek run --all-files
 
 The pre-commit hooks keep `uv.lock` synchronized, run Ruff, and validate common text/configuration errors.
 The pytest configuration disables network access. Source packaging, Pydantic v2 validation, the benchmark TOML,
-immutable SI conversion, numerical solver, and scientific tests are implemented. Run the benchmark with:
+immutable SI conversion, numerical solver, exports, local UI, and scientific tests are implemented. The numerical API
+remains available directly:
 
 ```python
 from charge_injection_sim import load_config, solve_all_cases
@@ -165,6 +195,6 @@ results = solve_all_cases(inputs)
 
 Each result contains immutable adaptive-mesh arrays in SI units and diagnostics including current density, solver
 status, boundary and voltage errors, current spread, independently evaluated equation residuals, extrema, node count,
-and elapsed time. Call `.model_dump_json()` on `inputs` when recording the resolved input snapshot.
+and elapsed time. Prefer `save_run` for a complete provenance-bearing output bundle.
 Code will use type annotations; dedicated type-checker tooling can follow the MVP.
 CI is out of scope at this point; checks will be run locally with uv and prek.

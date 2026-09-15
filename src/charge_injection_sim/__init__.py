@@ -5,7 +5,9 @@ from charge_injection_sim.config import (
     InputConfig,
     ResolvedInputsSI,
     load_config,
+    load_inputs,
 )
+from charge_injection_sim.output import save_run
 from charge_injection_sim.solver import (
     SimulationResult,
     SolverDiagnostics,
@@ -22,6 +24,8 @@ __all__ = [
     "SolverDiagnostics",
     "SolverError",
     "load_config",
+    "load_inputs",
+    "save_run",
     "solve_all_cases",
     "solve_case",
 ]
