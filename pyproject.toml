@@ -7,8 +7,13 @@ requires-python = ">=3.14"
 dependencies = [
     "matplotlib",
     "numpy",
+    "pydantic>=2,<3",
     "scipy",
 ]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
 
 [dependency-groups]
 dev = [
@@ -18,9 +23,6 @@ dev = [
     "pytest-socket",
     "ruff",
 ]
-
-[tool.uv]
-package = false
 
 [tool.pytest.ini_options]
 addopts = [

@@ -5,17 +5,20 @@ of a dielectric material. The first target is the bipolar charge-injection resul
 where conductivity is plotted through a 500 um Fe-doped SrTiO3 crystal for several equal electron and hole Schottky
 barrier heights.
 
-The repository is currently a development scaffold. It does not yet contain a validated numerical implementation or a
-reproduced figure.
+The repository now contains the Stage 1 package and validated benchmark input contract. It does not yet contain a
+numerical solver, web interface, or reproduced figure.
 
 **First milestone:** an explicitly approximate, scientifically checked reproduction of Figure 4(b), driven by a
 TOML configuration file validated with Pydantic v2 and explored through a local web interface on WSL/Linux.
 The MVP uses one NiceGUI + Plotly page: edit parameters, click Run, inspect the three curves, and save the result.
-A thin script supports repeatable runs. The author's code/data are unavailable; exact reproduction is not
-a prerequisite for this milestone. No simulator, web interface, run script, or configuration schema is implemented yet.
+A thin script will support repeatable runs. The author's code/data are unavailable; exact reproduction is not
+a prerequisite for this milestone. The configuration schema and SI conversion are implemented; the simulator, web
+interface, and run script remain planned.
 
 See the [critical review](docs/review.md) for the evidence and unresolved assumptions, and the
 [staged implementation plan](docs/implementation-plan.md) for architecture, delivery gates, and validation.
+The [prototype model contract](docs/model.md) records the equations, coordinate convention, scaling plan, assumptions,
+and singular cases that constrain the solver implementation.
 
 ## Planned Interactive Workflow
 
@@ -117,14 +120,14 @@ The user has already sought the authors' code/data without success. The plan the
 problem from Equations (1), (3), and (5), rather than relying on the missing implementation or treating Equation (6)
 as a complete initial-value problem.
 
-## Planned Layout
+## Project Layout
 
 ```text
-src/charge_injection_sim/  model, parameters, solver, and result types
-configs/                   validated TOML benchmark inputs (planned)
+src/charge_injection_sim/  validated inputs and SI conversion; solver modules planned
+configs/                   validated TOML benchmark inputs
 docs/                      review and staged implementation plan
 scripts/                   thin reproducible simulation/plot entry points
-tests/                     unit, limiting-case, and numerical regression tests
+tests/                     configuration/unit tests; numerical tests planned
 tests/data/                digitized comparison curves with provenance (post-MVP)
 outputs/                   generated data and figures (ignored by Git)
 ref_paper.pdf              primary reference paper
@@ -149,8 +152,9 @@ uv run prek run --all-files
 ```
 
 The pre-commit hooks keep `uv.lock` synchronized, run Ruff, and validate common text/configuration errors.
-The pytest configuration disables network access, but no tests exist yet: currently `uv run pytest` fails because
-the configured `tests/` directory is absent and warnings are errors. Source packaging is also not yet enabled
-(`tool.uv.package = false`); packaging, Pydantic, and essential tests are Stage 1 deliverables.
+The pytest configuration disables network access. Source packaging, Pydantic v2 validation, the benchmark TOML,
+immutable SI conversion, and foundational configuration tests are implemented. Load the benchmark with
+`charge_injection_sim.load_config("configs/figure4b.toml")`; call `.to_si()` before numerical use and
+`.model_dump_json()` when recording the resolved snapshot.
 Code will use type annotations; dedicated type-checker tooling can follow the MVP.
 CI is out of scope at this point; checks will be run locally with uv and prek.

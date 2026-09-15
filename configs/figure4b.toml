@@ -1,0 +1,35 @@
+[material]
+relative_permittivity = 220.0
+reported_total_fe_cm3 = 5.58e18
+oxygen_vacancy_cm3 = 2.43e18
+electron_effective_mass_m0 = 6.0
+hole_effective_mass_m0 = 12.0
+electron_mobility_cm2_per_v_s = 0.56
+hole_mobility_cm2_per_v_s = 0.41
+oxygen_vacancy_mobility_cm2_per_v_s = 2.20e-8
+recombination_cm3_per_s = 1.0e-8
+
+[experiment]
+temperature_k = 483.15
+voltage_v = 40.0
+thickness_um = 500.0
+
+[[cases]]
+name = "barrier_1p00_ev"
+electron_barrier_ev = 1.00
+hole_barrier_ev = 1.00
+
+[[cases]]
+name = "barrier_0p85_ev"
+electron_barrier_ev = 0.85
+hole_barrier_ev = 0.85
+
+[[cases]]
+name = "barrier_0p80_ev"
+electron_barrier_ev = 0.80
+hole_barrier_ev = 0.80
+
+[solver]
+residual_tolerance = 1.0e-5
+initial_nodes = 201
+maximum_nodes = 20000
