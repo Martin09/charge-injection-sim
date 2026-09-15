@@ -130,35 +130,33 @@ def create_page(config_path: str | Path = DEFAULT_CONFIG) -> None:
         with ui.expansion("Fixed material and numerical parameters", icon="science").classes(
             "w-full bg-white"
         ):
-            material_rows = [
-                {"parameter": key, "value": f"{value:g}"}
+
+            def _label(key: str) -> str:
+                return key.replace("_", " ")
+
+            def _number(label: str, value: float, integer: bool = False) -> Any:
+                element = ui.number(label, value=value, format="%.6g").classes("w-full")
+                if integer:
+                    element.props("step=1")
+                return element
+
+            material_inputs = [
+                _number(_label(key), value)
                 for key, value in initial.material.model_dump().items()
                 if key != "recombination_cm3_per_s"
             ]
-            solver_rows = [
-                {"parameter": key, "value": f"{value:g}"}
-                for key, value in initial.solver.model_dump().items()
+            material_keys = [
+                key for key in initial.material.model_dump() if key != "recombination_cm3_per_s"
             ]
-            ui.table(
-                columns=[
-                    {
-                        "name": "parameter",
-                        "label": "Material parameter (units in name)",
-                        "field": "parameter",
-                    },
-                    {"name": "value", "label": "Value", "field": "value"},
-                ],
-                rows=material_rows,
-                row_key="parameter",
-            ).classes("w-full")
-            ui.table(
-                columns=[
-                    {"name": "parameter", "label": "Solver setting", "field": "parameter"},
-                    {"name": "value", "label": "Value", "field": "value"},
-                ],
-                rows=solver_rows,
-                row_key="parameter",
-            ).classes("w-full")
+            solver_inputs = []
+            for key, value in initial.solver.model_dump().items():
+                solver_inputs.append(
+                    (
+                        key,
+                        _number(_label(key), value, integer=isinstance(value, int)),
+                        isinstance(value, int),
+                    )
+                )
 
         with ui.expansion("Model assumptions", icon="info").classes(
             "w-full bg-white scientific-note"
@@ -174,16 +172,32 @@ def create_page(config_path: str | Path = DEFAULT_CONFIG) -> None:
             thickness_um=thickness.value,
         )
         data["material"]["recombination_cm3_per_s"] = recombination.value
+        for key, material_input in zip(material_keys, material_inputs, strict=True):
+            data["material"][key] = material_input.value
+        for key, (_, solver_input, is_integer) in zip(
+            initial.solver.model_dump(), solver_inputs, strict=True
+        ):
+            data["solver"][key] = int(solver_input.value) if is_integer else solver_input.value
         for case, barrier_input in zip(data["cases"], barrier_inputs, strict=True):
             case["electron_barrier_ev"] = barrier_input.value
             case["hole_barrier_ev"] = barrier_input.value
         return InputConfig.model_validate(data)
 
+    ui_inputs = [
+        temperature,
+        voltage,
+        thickness,
+        recombination,
+        *barrier_inputs,
+        *material_inputs,
+        *(element for _key, element, _is_int in solver_inputs),
+    ]
+
     def mark_edited() -> None:
         if completed is not None:
             status_label.set_text("Inputs changed; plot shows the last completed run")
 
-    for field in [temperature, voltage, thickness, recombination, *barrier_inputs]:
+    for field in ui_inputs:
         field.on_value_change(lambda _event: mark_edited())
 
     async def execute_run() -> None:
@@ -198,7 +212,7 @@ def create_page(config_path: str | Path = DEFAULT_CONFIG) -> None:
 
         in_flight = True
         run_button.disable()
-        for field in [temperature, voltage, thickness, recombination, *barrier_inputs]:
+        for field in ui_inputs:
             field.disable()
         busy.set_visibility(True)
         error_label.set_text("")
@@ -258,7 +272,7 @@ def create_page(config_path: str | Path = DEFAULT_CONFIG) -> None:
             in_flight = False
             busy.set_visibility(False)
             run_button.enable()
-            for field in [temperature, voltage, thickness, recombination, *barrier_inputs]:
+            for field in ui_inputs:
                 field.enable()
 
     def save_completed_run() -> None:
